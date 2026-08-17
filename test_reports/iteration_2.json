@@ -1,0 +1,43 @@
+{
+  "summary": "Regression + new billing-router tests. 39/39 backend pytest passed including new endpoints: GET /billing/geo, POST /billing/checkout (real Stripe), GET /payments/status/{id}, POST /webhook/stripe (400 on bad sig), POST /billing/mock-unlock. Frontend verified: AI category tiles render with coral bg rgb(255,98,66) and visible white text (all 8 AI tools present with name/desc/credits). Landing 'landing-paid-card' present with feature list. /pricing shows two cards ($0 Free with 4 crossed-out + 4 included, $1 Lifetime with 8 included), data-testid geo-detected shows 'detected · US · pay in USD', paid-price shows '$1', unlock-btn present.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/billing/geo", "issue": "In non-CF containers, falls through to ipapi.co which may rate-limit or timeout (3s). Consider caching the resolved country per-IP to avoid outbound call on every geo hit."},
+      {"endpoint": "POST /api/billing/checkout", "issue": "webhook_url is derived from request.base_url which resolves to the internal container URL (http://backend:8001) rather than the public REACT_APP_BACKEND_URL. Stripe cannot reach that. Use env-based public base URL when registering the webhook.", "priority": "MEDIUM"},
+      {"endpoint": "POST /api/webhook/stripe", "issue": "handle_webhook accepts payload+sig; unsigned test posts return 400 as expected. OK."},
+      {"endpoint": "GET /api/payments/status/{sid}", "issue": "On each poll while pending, code re-invokes Stripe API. Fine for demo; add short in-memory throttle for production."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Landing hero", "issues": ["Hero says '53 tools' and '01 / 52' page indicator, but data-testid^='tool-' returns 55 nodes. Likely double-count from featured tiles or duplicate rendering. Not blocking, but confusing for QA."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ughpdf_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Set the Stripe webhook_url from env (REACT_APP_BACKEND_URL or a new PUBLIC_BASE_URL) instead of request.base_url, so Stripe can actually POST to /api/webhook/stripe in preview/prod.",
+    "Reconcile tool count (53 in copy vs 55 tool-* nodes rendered on landing) — investigate ToolsGrid to remove duplicates or update copy."
+  ],
+  "critical_code_review_comments": [
+    "billing.py _get_checkout uses str(request.base_url) — inside Kubernetes ingress this often becomes the internal service URL, breaking outbound webhook registration. Use os.environ['PUBLIC_BASE_URL'] or REACT_APP_BACKEND_URL.",
+    "billing.py _grant_lifetime has redundant update on the early-return branch (updates same doc twice on race). Simplify to single conditional update-and-grant.",
+    "billing.py stores user_id from user['_id'] as-is; make sure the auth layer normalises Mongo _id to string before persisting to avoid ObjectId serialisation errors in payment_transactions.",
+    "billing.py exposes /billing/mock-unlock unauthenticated of dev-mode? — It requires auth via Depends(get_current_user), good. Consider disabling in production build (env flag)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ughpdf_backend.py (added test_billing_geo, test_billing_checkout_real_stripe, test_payments_status_created, test_payments_status_unknown_404, test_stripe_webhook_invalid_signature; fixed mock-unlock assertion to verify via /auth/me)"
+  ],
+  "success_rate": {"backend": "100% (39/39)", "frontend": "100% for the 3 targeted flows (AI tiles render, landing paid card, pricing page)"},
+  "test_credentials": "Ephemeral users created per test-run via /api/auth/signup. Documented user test1@ughpdf.com / testpass123 still valid.",
+  "seed_data_creation": "None permanent. Every checkout test creates a real Stripe test-mode session (cs_test_*) that stays in Stripe sandbox until it expires (~24h).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "New billing router lives at /app/backend/billing.py. Test file covers all endpoints. Real Stripe TEST-mode checkout URLs are returned (start with https://checkout.stripe.com). Webhook_url currently uses request.base_url which is likely wrong in preview/prod — main agent should fix. Geo detection in this container returns US via ipapi.co fallback.",
+  "rca of the issue": "No critical bug hit. Main follow-up: Stripe webhook URL registration uses internal request.base_url; Stripe cannot deliver events. Fix by reading a PUBLIC_BASE_URL env at router construction time."
+}

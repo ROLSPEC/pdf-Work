@@ -475,49 +475,9 @@ async def generic_stub(tool_id: str, file: UploadFile = File(...), user=Depends(
     return _pdf_response(data, f"{tool_id}-{file.filename}")
 
 
-# ============ Billing (Stripe) ============
-try:
-    import stripe as _stripe
-    _stripe_key = os.environ.get("STRIPE_SECRET_KEY")
-    if _stripe_key:
-        _stripe.api_key = _stripe_key
-except Exception:
-    _stripe = None
-
-
-@api.post("/billing/checkout")
-async def checkout(request: Request, user=Depends(get_current_user)):
-    """Creates a Stripe Checkout session for $1 lifetime unlock.
-    If Stripe not configured, returns a mock success URL (dev mode)."""
-    origin = request.headers.get("origin") or os.environ.get("FRONTEND_URL", "")
-    if not _stripe or not os.environ.get("STRIPE_SECRET_KEY"):
-        # DEV: mock unlock — mark user as lifetime and return success
-        await db.users.update_one({"_id": user["_id"]}, {"$set": {"plan": "lifetime", "ai_credits": PAID_CREDITS}})
-        return {"url": f"{origin}/unlocked?mock=1", "mock": True}
-    session = _stripe.checkout.Session.create(
-        mode="payment",
-        line_items=[{
-            "price_data": {
-                "currency": "usd",
-                "unit_amount": 100,
-                "product_data": {"name": "Ugh!PDF Lifetime Unlock"},
-            },
-            "quantity": 1,
-        }],
-        client_reference_id=user["_id"],
-        metadata={"user_id": user["_id"]},
-        success_url=f"{origin}/unlocked?session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{origin}/pricing",
-    )
-    return {"url": session.url}
-
-
-@api.post("/billing/mock-unlock")
-async def mock_unlock(user=Depends(get_current_user)):
-    """Dev helper: instantly unlock lifetime."""
-    await db.users.update_one({"_id": user["_id"]}, {"$set": {"plan": "lifetime", "ai_credits": PAID_CREDITS}})
-    u = await db.users.find_one({"_id": user["_id"]})
-    return user_public(u)
+# ============ Billing (Stripe geo-priced) ============
+from billing import build_router as _billing_router
+api.include_router(_billing_router(db, get_current_user, PAID_CREDITS))
 
 
 # ============ Health ============

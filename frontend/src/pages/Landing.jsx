@@ -163,6 +163,53 @@ export default function Landing() {
           <WhyCard label="smart" tone="bg-accent/30" title="AI you'd actually use." desc="Chat with any PDF, extract invoices to JSON, or turn a book into an audiobook." />
         </div>
       </section>
+
+      {/* PLAN COMPARE */}
+      <section className="border-t-2 border-border">
+        <div className="max-w-7xl mx-auto px-6 py-16">
+          <div className="text-center max-w-2xl mx-auto mb-8">
+            <div className="brut-chip inline-flex">· free vs paid ·</div>
+            <h2 className="font-display text-4xl tracking-tighter mt-4">What you get on each plan.</h2>
+          </div>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="brut bg-card p-6">
+              <div className="flex items-baseline justify-between">
+                <div className="font-display text-3xl tracking-tighter">Free</div>
+                <div className="font-display text-3xl">$0</div>
+              </div>
+              <ul className="mt-4 space-y-2 text-sm font-medium">
+                <li>✓ All 12 in-browser tools · unlimited</li>
+                <li>✓ 25MB max file size</li>
+                <li>✓ 10 cloud ops / day</li>
+                <li>✓ 5 AI credits / month</li>
+                <li className="opacity-50">✗ 100MB files / 200 ops-day</li>
+                <li className="opacity-50">✗ 50 AI credits / month</li>
+                <li className="opacity-50">✗ BYOK unlimited AI</li>
+              </ul>
+            </div>
+            <div className="brut btn-primary-ink p-6" data-testid="landing-paid-card">
+              <div className="flex items-baseline justify-between">
+                <div className="font-display text-3xl tracking-tighter">Lifetime</div>
+                <div className="font-display text-3xl">$1</div>
+              </div>
+              <ul className="mt-4 space-y-2 text-sm font-bold">
+                <li>✓ Everything in Free, plus…</li>
+                <li>✓ 100MB max file size</li>
+                <li>✓ 200 cloud ops / day (basically unlimited)</li>
+                <li>✓ 50 AI credits / month (auto-refill)</li>
+                <li>✓ BYOK — unlimited AI, zero cost</li>
+                <li>✓ Priority processing</li>
+                <li>✓ One-time · geo-priced ($1 / £1 / €1 / ₹1…)</li>
+              </ul>
+              <button onClick={() => nav("/pricing")}
+                data-testid="landing-unlock-cta"
+                className="w-full brut-sm brut-hover btn-ink mt-5 px-4 py-3 font-mono text-xs uppercase tracking-widest font-bold">
+                See pricing →
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

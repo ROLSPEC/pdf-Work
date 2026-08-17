@@ -73,7 +73,10 @@ def lifetime_user():
     token = r.json()["token"]
     r2 = requests.post(f"{API}/billing/mock-unlock", headers={"Authorization": f"Bearer {token}"})
     assert r2.status_code == 200, r2.text
-    return {"email": email, "token": token, "user": r2.json()}
+    # Verify by fetching /auth/me
+    me = requests.get(f"{API}/auth/me", headers={"Authorization": f"Bearer {token}"}).json()
+    assert me["plan"] == "lifetime"
+    return {"email": email, "token": token, "user": me}
 
 
 @pytest.fixture(scope="session")
@@ -347,16 +350,68 @@ def test_billing_mock_unlock():
     tok = r.json()["token"]
     r2 = requests.post(f"{API}/billing/mock-unlock", headers={"Authorization": f"Bearer {tok}"})
     assert r2.status_code == 200, r2.text
-    d = r2.json()
-    assert d["plan"] == "lifetime"
-    assert d["ai_credits"] == 50
+    assert r2.json().get("plan") == "lifetime"
+    # Verify persistence via /auth/me
+    me = requests.get(f"{API}/auth/me", headers={"Authorization": f"Bearer {tok}"}).json()
+    assert me["plan"] == "lifetime"
+    assert me["ai_credits"] == 50
 
 
-def test_billing_checkout_mock():
+def test_billing_geo():
+    r = requests.get(f"{API}/billing/geo")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    for k in ("country", "currency", "symbol", "amount", "display"):
+        assert k in d, f"missing key {k}"
+    # In container network, country resolves via ipapi.co; expect US w/ USD $1
+    # (tolerate other countries as fallback if geo detection returns something else)
+    assert d["amount"] == 1.0
+    assert d["display"].endswith("1")
+    assert d["currency"] in ("USD", "CAD", "GBP", "EUR", "AUD", "NZD", "INR")
+
+
+def test_billing_checkout_real_stripe():
     email = f"co_{uuid.uuid4().hex[:8]}@ughpdf.com"
     r = requests.post(f"{API}/auth/signup", json={"email": email, "password": "testpass123"})
     tok = r.json()["token"]
-    r2 = requests.post(f"{API}/billing/checkout", headers={"Authorization": f"Bearer {tok}"})
+    r2 = requests.post(
+        f"{API}/billing/checkout",
+        headers={"Authorization": f"Bearer {tok}"},
+        json={"origin_url": "https://pdf-52-tools.preview.emergentagent.com"},
+        timeout=30,
+    )
     assert r2.status_code == 200, r2.text
     d = r2.json()
     assert "url" in d
+    assert d["url"].startswith("https://checkout.stripe.com"), f"Expected real Stripe URL, got: {d['url']}"
+    assert "session_id" in d and d["session_id"].startswith("cs_")
+    assert d["amount"] == 1.0
+    assert d["currency"] in ("USD", "CAD", "GBP", "EUR", "AUD", "NZD", "INR")
+    # Stash for status test
+    test_billing_checkout_real_stripe.session_id = d["session_id"]
+    test_billing_checkout_real_stripe.currency = d["currency"]
+
+
+def test_payments_status_created():
+    sid = getattr(test_billing_checkout_real_stripe, "session_id", None)
+    assert sid, "checkout must run first"
+    r = requests.get(f"{API}/payments/status/{sid}")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["session_id"] == sid
+    # Status is initiated until payment completes
+    assert d["status"] in ("initiated", "completed")
+    assert d["payment_status"] in ("pending", "paid")
+    assert d["amount"] == 1.0
+
+
+def test_payments_status_unknown_404():
+    r = requests.get(f"{API}/payments/status/cs_test_does_not_exist_xyz")
+    assert r.status_code == 404
+
+
+def test_stripe_webhook_invalid_signature():
+    # No valid stripe-signature header -> 400
+    r = requests.post(f"{API}/webhook/stripe", data=b'{"type":"noop"}',
+                      headers={"stripe-signature": "t=1,v1=fake"})
+    assert r.status_code == 400
