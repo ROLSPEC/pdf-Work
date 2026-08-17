@@ -225,7 +225,29 @@ export default function ToolPage() {
 function JsonResult({ data }) {
   return (
     <div className="space-y-3">
-      {data.answer && <div className="whitespace-pre-wrap text-sm font-medium">{data.answer}</div>}
+      {data.answer && (
+        <div>
+          <div className="whitespace-pre-wrap text-sm font-medium">{data.answer}</div>
+          {Array.isArray(data.citations) && data.citations.length > 0 && (
+            <div className="mt-4">
+              <div className="font-mono text-[10px] uppercase tracking-widest font-bold mb-2">
+                ↳ Retrieved · RAG · {data.n_chunks_used}/{data.n_chunks_total} chunks
+              </div>
+              <div className="space-y-2">
+                {data.citations.map((c, i) => (
+                  <div key={i} className="brut-sm bg-card p-3">
+                    <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-widest font-bold">
+                      <span>[p.{c.page}]</span>
+                      <span className="opacity-60">score {c.score}</span>
+                    </div>
+                    <p className="text-xs mt-1 font-medium text-muted-foreground">{c.snippet}…</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       {data.summary && <div className="whitespace-pre-wrap text-sm font-medium">{data.summary}</div>}
       {data.solution && <div className="whitespace-pre-wrap text-sm font-medium">{data.solution}</div>}
       {data.diff && <div className="whitespace-pre-wrap text-sm font-medium">{data.diff}</div>}

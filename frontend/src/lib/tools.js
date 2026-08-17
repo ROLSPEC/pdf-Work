@@ -67,7 +67,7 @@ export const TOOLS = [
   { id: "certify", name: "Certify PDF", cat: "security", engine: "server", desc: "Anti-tamper" },
 
   // AI (8)
-  { id: "ai-chat", name: "Chat with PDF", cat: "ai", engine: "ai", credits: 1, desc: "Cited answers" },
+  { id: "ai-chat", name: "Chat with PDF", cat: "ai", engine: "ai", credits: 1, desc: "RAG · cited answers" },
   { id: "ai-summarize", name: "Summarize", cat: "ai", engine: "ai", credits: 2, desc: "Structured summary" },
   { id: "ai-redact", name: "AI PII Redactor", cat: "ai", engine: "ai", credits: 3, desc: "Auto-find PII" },
   { id: "ai-extract", name: "Extract Data", cat: "ai", engine: "ai", credits: 3, desc: "Invoices → JSON" },

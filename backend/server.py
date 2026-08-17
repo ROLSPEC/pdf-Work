@@ -370,9 +370,19 @@ class ChatBody(BaseModel):
 async def ai_chat(file: UploadFile = File(...), question: str = Form(...), user=Depends(get_current_user)):
     data = await _read_upload(file, user)
     await _consume_op(user, credits=1)
-    text = pdf_ops.extract_text(data)
-    answer = await ai_service.chat_with_pdf(text, question)
-    return {"answer": answer}
+    # RAG pipeline: build/reuse cached index → retrieve top-K chunks → LLM with citations
+    import rag
+    fh, chunks, vec, matrix = await rag.get_or_build_index(db, data)
+    retrieved = rag.retrieve(vec, matrix, chunks, question, k=5)
+    context = rag.build_context(retrieved)
+    answer = await ai_service.chat_with_rag(context, question)
+    return {
+        "answer": answer,
+        "citations": [{"page": r["page"], "score": round(r["score"], 3), "snippet": r["text"][:180]} for r in retrieved],
+        "file_hash": fh,
+        "n_chunks_total": len(chunks),
+        "n_chunks_used": len(retrieved),
+    }
 
 
 @api.post("/tools/ai-summarize/run")

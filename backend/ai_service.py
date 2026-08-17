@@ -30,6 +30,22 @@ async def chat_with_pdf(pdf_text: str, question: str) -> str:
     return await llm.send_message(msg)
 
 
+async def chat_with_rag(context: str, question: str) -> str:
+    """RAG-flavoured chat: `context` is a pre-retrieved set of top-K chunks
+    (each prefixed with [p.N]). We instruct the LLM to answer ONLY from these
+    chunks and cite pages inline.
+    """
+    system = (
+        "You are a Retrieval-Augmented QA assistant. Answer the user's question "
+        "using ONLY the provided PDF excerpts. Every claim must be followed by a "
+        "citation like [p.3]. If the excerpts do not contain the answer, say "
+        "'I couldn't find that in the document.' Do not invent facts."
+    )
+    llm = _chat(system, CHAT_MODEL, "gemini")
+    msg = UserMessage(text=f"PDF EXCERPTS:\n{context}\n\nQUESTION: {question}\n\nAnswer with inline [p.N] citations.")
+    return await llm.send_message(msg)
+
+
 async def summarize(pdf_text: str) -> str:
     system = (
         "Summarize the PDF in a structured format: "

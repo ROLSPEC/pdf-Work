@@ -245,7 +245,104 @@ def test_ai_chat(life_headers, sample_pdf):
     r = requests.post(f"{API}/tools/ai-chat/run", headers=life_headers,
                       files=files, data={"question": "What is the total?"}, timeout=120)
     assert r.status_code == 200, r.text
-    assert "answer" in r.json()
+    d = r.json()
+    # RAG payload assertions
+    assert "answer" in d and isinstance(d["answer"], str) and len(d["answer"]) > 0
+    assert "citations" in d and isinstance(d["citations"], list)
+    assert "file_hash" in d and len(d["file_hash"]) == 64  # SHA-256 hex
+    assert "n_chunks_used" in d and "n_chunks_total" in d
+    assert d["n_chunks_total"] >= 1
+    for c in d["citations"]:
+        assert "page" in c and "score" in c and "snippet" in c
+    test_ai_chat.file_hash = d["file_hash"]
+
+
+def _make_two_page_pdf():
+    """Page 1: John Doe. Page 2: Acme invoice total."""
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=LETTER)
+    c.drawString(72, 720, "This document is about a person named John Doe.")
+    c.drawString(72, 700, "John Doe is our primary customer and contact.")
+    c.showPage()
+    c.drawString(72, 720, "Acme invoice details are recorded here.")
+    c.drawString(72, 700, "The Acme invoice total is $1,234.56 due next month.")
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+def test_ai_chat_rag_relevance_person(life_headers):
+    pdf = _make_two_page_pdf()
+    files = {"file": ("rag.pdf", pdf, "application/pdf")}
+    r = requests.post(f"{API}/tools/ai-chat/run", headers=life_headers,
+                      files=files, data={"question": "Who is the person mentioned?"}, timeout=120)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    pages = [c["page"] for c in d["citations"]]
+    assert 1 in pages, f"Expected page 1 citation for person query, got {pages}"
+
+
+def test_ai_chat_rag_relevance_invoice(life_headers):
+    pdf = _make_two_page_pdf()
+    files = {"file": ("rag.pdf", pdf, "application/pdf")}
+    r = requests.post(f"{API}/tools/ai-chat/run", headers=life_headers,
+                      files=files, data={"question": "What is the invoice total?"}, timeout=120)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    pages = [c["page"] for c in d["citations"]]
+    assert 2 in pages, f"Expected page 2 citation for invoice query, got {pages}"
+
+
+def test_ai_chat_rag_cache_persistence(life_headers, sample_pdf):
+    """Same file uploaded twice must reuse the cached index (single MongoDB entry)."""
+    files1 = {"file": ("s.pdf", sample_pdf, "application/pdf")}
+    r1 = requests.post(f"{API}/tools/ai-chat/run", headers=life_headers,
+                       files=files1, data={"question": "invoice total?"}, timeout=120)
+    assert r1.status_code == 200
+    fh1 = r1.json()["file_hash"]
+    files2 = {"file": ("s.pdf", sample_pdf, "application/pdf")}
+    r2 = requests.post(f"{API}/tools/ai-chat/run", headers=life_headers,
+                       files=files2, data={"question": "who signed?"}, timeout=120)
+    assert r2.status_code == 200
+    fh2 = r2.json()["file_hash"]
+    assert fh1 == fh2, "Same file bytes must produce same hash"
+
+    # Different file → different hash
+    other_pdf = _make_two_page_pdf()
+    files3 = {"file": ("o.pdf", other_pdf, "application/pdf")}
+    r3 = requests.post(f"{API}/tools/ai-chat/run", headers=life_headers,
+                       files=files3, data={"question": "who?"}, timeout=120)
+    assert r3.status_code == 200
+    fh3 = r3.json()["file_hash"]
+    assert fh3 != fh1, "Different files must produce different hashes"
+
+
+def test_rag_index_stored_in_mongo(life_headers, sample_pdf):
+    """Verify the rag_indexes collection contains an entry keyed by file_hash."""
+    import pymongo
+    # Trigger a chat to ensure entry exists
+    files = {"file": ("s.pdf", sample_pdf, "application/pdf")}
+    r = requests.post(f"{API}/tools/ai-chat/run", headers=life_headers,
+                      files=files, data={"question": "?"}, timeout=120)
+    assert r.status_code == 200
+    fh = r.json()["file_hash"]
+    # Read env directly
+    mongo_url = os.environ.get("MONGO_URL")
+    db_name = os.environ.get("DB_NAME")
+    if not mongo_url or not mongo_url.startswith("mongodb"):
+        # Fallback: parse backend/.env
+        with open("/app/backend/.env") as f:
+            for line in f:
+                if line.startswith("MONGO_URL="):
+                    mongo_url = line.split("=", 1)[1].strip().strip('"').strip("'")
+                elif line.startswith("DB_NAME="):
+                    db_name = line.split("=", 1)[1].strip().strip('"').strip("'")
+    client = pymongo.MongoClient(mongo_url)
+    db_h = client[db_name]
+    doc = db_h.rag_indexes.find_one({"_id": fh})
+    assert doc is not None, f"rag_indexes missing entry for {fh}"
+    assert "chunks" in doc and "blob" in doc and "n_chunks" in doc
+    assert doc["n_chunks"] >= 1
 
 
 def test_ai_extract(life_headers, sample_pdf):

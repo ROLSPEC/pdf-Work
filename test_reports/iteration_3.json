@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 3 verified RAG-powered Chat-with-PDF, AI-tile visibility regression, and full backend regression from iteration 2. Backend: 43/43 pytest pass. Added 4 new RAG-focused tests (payload shape, page-1 relevance for person query, page-2 relevance for invoice query, cache/hash persistence, MongoDB rag_indexes entry). Frontend: all 8 AI tiles (ai-chat, ai-summarize, ai-audiobook, ai-redact, ai-extract, ai-math, ai-ocr, ai-visual-diff) render with coral bg rgb(255,98,66) and white text rgb(255,255,255) in BOTH light and dark modes on / with cat-ai filter active. /t/ai-chat page shows question textarea (opt-question), tool-run button, and upload zone. Geo billing, Stripe checkout, payments status all still pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/tools/ai-chat/run", "issue": "RAG uses TF-IDF (sklearn) rather than neural embeddings — acceptable per spec (Emergent proxy has no embeddings endpoint). Cosine-sim on short 2-page PDFs works but may struggle with paraphrased queries; consider hybrid BM25+TFIDF or sentence-transformers when available."},
+      {"endpoint": "POST /api/tools/ai-chat/run", "issue": "RAG index blob stored as pickled+base64 TfidfVectorizer inside MongoDB doc — pickle across sklearn versions can break; consider storing vocab_ + IDF weights as JSON, or re-fit on load."},
+      {"endpoint": "POST /api/billing/checkout", "issue": "(carried from iter 2) webhook_url derived from request.base_url — still resolves to internal Kubernetes URL. Stripe cannot POST to it. Use PUBLIC_BASE_URL env."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/t/ai-chat", "issues": ["ACTION panel renders an empty-looking white box for the Run button when logged out — the tool-run element exists but visually reads as blank (only faint border). Consider showing 'LOG IN TO RUN' text or disabled state label for anonymous users."]},
+      {"screen": "Landing hero (carried from iter 2)", "issues": ["Copy says '53 tools' but tools registry returns 52 base tools; hero indicator shows '01 / 52'. Minor inconsistency."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ughpdf_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: replace pickled TfidfVectorizer blob in rag_indexes with a JSON-safe representation to avoid future sklearn-version pickle breakage.",
+    "Optional: show a clearer disabled state for the Run button on /t/ai-chat when the user is logged out (currently visually blank).",
+    "Still open from iter 2: derive Stripe webhook_url from PUBLIC_BASE_URL env instead of request.base_url."
+  ],
+  "critical_code_review_comments": [
+    "rag.py stores base64(pickle(TfidfVectorizer, matrix)) in Mongo — works but couples cache to exact sklearn version and Python pickle protocol. If sklearn is upgraded, cached entries will fail to deserialize. Recommend adding a version marker and rebuild-on-mismatch, or serialize vocabulary + IDF vector to JSON.",
+    "rag.get_or_build_index does a synchronous pdf_ops.extract_text_by_page + TfidfVectorizer.fit_transform inside the request path — for large PDFs this blocks the event loop. Consider running inside asyncio.to_thread / a threadpool executor.",
+    "server.py ai_chat consumes credits BEFORE calling ai_service.chat_with_rag; if the LLM call errors out, the user still lost 1 credit. Consider credit refund on exception or consume-after-success.",
+    "rag.retrieve fallback returns even zero-similarity chunks when nothing scores >0 — good UX, but citations then have score 0.0 which could mislead users. Consider filtering with a small floor (e.g., 0.01) and returning empty citations list rather than noise."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ughpdf_backend.py (added: test_ai_chat_rag_relevance_person, test_ai_chat_rag_relevance_invoice, test_ai_chat_rag_cache_persistence, test_rag_index_stored_in_mongo; extended test_ai_chat with citations/file_hash/n_chunks assertions)"
+  ],
+  "success_rate": {"backend": "100% (43/43)", "frontend": "100% for targeted flows (AI tiles light+dark, /t/ai-chat page shape)"},
+  "test_credentials": "test1@ughpdf.com / testpass123 (lifetime, per spec); tests use ephemeral signup",
+  "seed_data_creation": "None permanent. RAG tests insert TF-IDF blobs into rag_indexes collection keyed by SHA-256 of test PDFs; safe to leave (small, deterministic).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "RAG pipeline lives in /app/backend/rag.py; wired into ai-chat at /app/backend/server.py:369. Response payload now includes citations[], file_hash, n_chunks_total, n_chunks_used. MongoDB collection 'rag_indexes' caches per-file index (_id = SHA-256 hex). All iter-2 tests still pass. Only visual nit: Run button on /t/ai-chat looks blank when logged out.",
+  "rca of the issue": "No critical bug. New RAG feature works end-to-end: same PDF bytes → same file_hash → cached retrieval (no re-vectorize); page-scoped chunks bring correct page numbers into citations (verified via person→p.1 and invoice→p.2 assertions). AI tile invisibility from iter-2 fix confirmed resolved in both themes."
+}
