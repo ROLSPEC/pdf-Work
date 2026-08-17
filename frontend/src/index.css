@@ -1,0 +1,131 @@
+@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: 'Archivo Black', ui-sans-serif, system-ui;
+  --font-body: 'Space Grotesk', ui-sans-serif, system-ui;
+  --font-mono: 'JetBrains Mono', ui-monospace;
+}
+
+@layer base {
+  :root {
+    /* Neo-Brutalist paper theme */
+    --background: 40 33% 96%;         /* #FAF7F2 */
+    --foreground: 240 5% 6%;          /* #0F0F10 */
+    --card: 0 0% 100%;
+    --card-foreground: 240 5% 6%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 5% 6%;
+    --primary: 71 88% 54%;            /* #C6F31E electric lime */
+    --primary-foreground: 240 5% 6%;
+    --secondary: 40 20% 92%;
+    --secondary-foreground: 240 5% 6%;
+    --muted: 40 20% 92%;
+    --muted-foreground: 240 5% 40%;
+    --accent: 10 100% 63%;            /* #FF5B45 coral */
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 5% 6%;              /* ink */
+    --input: 240 5% 6%;
+    --ring: 71 88% 54%;
+    --radius: 0.5rem;
+
+    --sky: 216 100% 74%;              /* #7AB8FF */
+    --sun: 45 100% 60%;               /* butter yellow */
+    --grape: 268 63% 60%;
+  }
+  .dark {
+    --background: 240 5% 8%;
+    --foreground: 40 33% 96%;
+    --card: 240 5% 12%;
+    --card-foreground: 40 33% 96%;
+    --popover: 240 5% 12%;
+    --popover-foreground: 40 33% 96%;
+    --primary: 71 88% 54%;
+    --primary-foreground: 240 5% 6%;
+    --secondary: 240 5% 15%;
+    --secondary-foreground: 40 33% 96%;
+    --muted: 240 5% 15%;
+    --muted-foreground: 240 5% 65%;
+    --accent: 10 100% 63%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 63% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 40 33% 96%;
+    --input: 40 33% 96%;
+    --ring: 71 88% 54%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+    font-feature-settings: "ss01", "cv01";
+  }
+  h1, h2, h3, h4, .font-display { font-family: var(--font-display); letter-spacing: -0.03em; }
+  code, pre, .font-mono { font-family: var(--font-mono); }
+}
+
+/* ============= Neo-brutalist utilities ============= */
+@layer utilities {
+  .btn-ink { background-color: hsl(var(--foreground)); color: hsl(var(--background)); }
+  .btn-primary-ink { background-color: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
+  .btn-accent-ink { background-color: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
+  .bg-ink { background-color: hsl(var(--foreground)); }
+  .text-ink { color: hsl(var(--foreground)); }
+  .bg-paper { background-color: hsl(var(--background)); }
+  .text-paper { color: hsl(var(--background)); }
+  .brut {
+    border: 2px solid hsl(var(--border));
+    box-shadow: 6px 6px 0 0 hsl(var(--border));
+    background: hsl(var(--card));
+  }
+  .brut-sm {
+    border: 2px solid hsl(var(--border));
+    box-shadow: 4px 4px 0 0 hsl(var(--border));
+    background: hsl(var(--card));
+  }
+  .brut-hover {
+    transition: transform 120ms ease, box-shadow 120ms ease;
+  }
+  .brut-hover:hover {
+    transform: translate(-2px, -2px);
+    box-shadow: 8px 8px 0 0 hsl(var(--border));
+  }
+  .brut-hover:active {
+    transform: translate(2px, 2px);
+    box-shadow: 2px 2px 0 0 hsl(var(--border));
+  }
+  .brut-chip {
+    display: inline-flex; align-items: center; gap: 0.375rem;
+    border: 2px solid hsl(var(--border));
+    background: hsl(var(--card));
+    padding: 0.15rem 0.55rem;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 700;
+    box-shadow: 2px 2px 0 0 hsl(var(--border));
+  }
+  .paper-grid {
+    background-image:
+      linear-gradient(hsl(var(--border) / 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--border) / 0.06) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  .sticker-rotate-l { transform: rotate(-3deg); }
+  .sticker-rotate-r { transform: rotate(2deg); }
+}
+
+/* Brutalist scrollbar */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border: 2px solid hsl(var(--background)); border-radius: 0; }
+
+/* Selection */
+::selection { background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }

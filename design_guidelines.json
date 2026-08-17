@@ -1,0 +1,136 @@
+{
+  "theme": "dark_and_light",
+  "brand": {
+    "name": "Ugh!PDF",
+    "vibe": "Playful but reliable, frictionless, soft utility. A sigh of relief. No harsh brutalism.",
+    "archetype": "ARCHETYPE 3: PASTEL & SOFT combined with high-contrast borders (Neo-Utility)."
+  },
+  "typography": {
+    "headings": {
+      "family": "Outfit, sans-serif",
+      "weights": ["600", "800"],
+      "description": "Clean, rounded geometry, modern and friendly."
+    },
+    "body": {
+      "family": "DM Sans, sans-serif",
+      "weights": ["400", "500"],
+      "description": "Highly readable, soft geometric."
+    },
+    "rules": [
+      "H1 (Hero): text-4xl sm:text-5xl lg:text-6xl tracking-tighter",
+      "H2 (Section): text-2xl sm:text-3xl lg:text-4xl tracking-tight",
+      "Never use Inter or generic sans for headings.",
+      "Overlines/Labels: Uppercase, tiny, wide spacing (tracking-[0.2em])"
+    ]
+  },
+  "colors": {
+    "light_mode": {
+      "background": "#F9FAFB",
+      "surface": "#FFFFFF",
+      "border": "#E5E7EB",
+      "text_primary": "#111827",
+      "text_secondary": "#4B5563",
+      "primary": "#4F46E5",
+      "primary_hover": "#4338CA",
+      "success_mint": "#10B981",
+      "warning": "#F59E0B",
+      "ai_accent": "#EC4899"
+    },
+    "dark_mode": {
+      "background": "#09090B",
+      "surface": "#18181B",
+      "border": "#27272A",
+      "text_primary": "#F9FAFB",
+      "text_secondary": "#A1A1AA",
+      "primary": "#6366F1",
+      "primary_hover": "#818CF8",
+      "success_mint": "#34D399",
+      "warning": "#FBBF24",
+      "ai_accent": "#F472B6"
+    },
+    "rules": [
+      "No pure #000000 or #808080. Greys must have a slight tint.",
+      "Avoid teal green for dashboards.",
+      "Avoid #7351B7 completely.",
+      "AI tools should use a distinct subtle gradient or the ai_accent color to stand out."
+    ]
+  },
+  "layouts": {
+    "general": [
+      "Universal drop-zone on home: Use a large hero section with dashed border, active hover states, and drag-and-drop mechanics.",
+      "Tool Pages: consistent layout (drop -> configure -> preview -> download) with a sidebar for settings and main area for preview.",
+      "Dashboard: Sidebar navigation + top bar + main content area."
+    ],
+    "grid": [
+      "Category Filter: Top horizontal scrollable or bento-style row for the 6 categories (Convert, Organize, Optimize, Edit, Security, AI).",
+      "Tools Grid: High density responsive grid for the 52 tools. grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4.",
+      "Grid items must be direct children of the grid container."
+    ]
+  },
+  "components": {
+    "buttons": "Pill-shaped (rounded-full) or smooth rounded (rounded-xl) with hover translations and subtle shadows.",
+    "cards": "Subtle roundness (max 12px border-radius). Flat background, 1px subtle border, no shadow by default. Hover: slight lift (-translate-y-1) and soft shadow.",
+    "drop_zone": "Glassmorphism panel with 'The Tracing Beam' or dashed border indicating it is interactive. Needs to feel large and forgiving.",
+    "badges": "Local vs Server processing badges must be clearly visible on tool cards. 🔒 Local, ☁️ Server.",
+    "progress": "Use Shadcn Progress component with streaming text feedback for long jobs.",
+    "shadcn_overrides": [
+      "Override default card styles to remove heavy shadows and use the 1px subtle border.",
+      "Use sonner for toasts.",
+      "Use Shadcn standard components for dropdowns, tabs, etc."
+    ]
+  },
+  "motion": {
+    "rules": [
+      "Micro-animations on all interactive elements.",
+      "Hover states must include a slight translate and shadow increase.",
+      "Use framer-motion for drag-and-drop feedback and entrance animations for the 52 tools.",
+      "Do NOT use transition: all."
+    ]
+  },
+  "accessibility": {
+    "rules": [
+      "All interactive elements MUST have data-testid attributes.",
+      "Respect prefers-reduced-motion.",
+      "Ensure contrast ratios meet APCA standards."
+    ]
+  },
+  "media": {
+    "icons": {
+      "library": "@phosphor-icons/react",
+      "installation": "yarn add @phosphor-icons/react",
+      "usage": "Use duotone or regular weight for a premium, friendly feel."
+    },
+    "images": [
+      {
+        "url": "https://images.unsplash.com/photo-1614851099511-773084f6911d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMHNvZnQlMjBncmFkaWVudCUyMHRleHR1cmUlMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc4NjYxOTM1Nnww&ixlib=rb-4.1.0&q=85",
+        "category": "hero_background",
+        "description": "Subtle purple and pink mesh gradient to use at low opacity (10-20%) behind the universal drop zone to give it a magical AI feel without being overwhelming."
+      }
+    ]
+  },
+  "visual_enhancers": {
+    "glassmorphism": "Use backdrop-blur-xl and backdrop-saturate-150 for the sticky header and the main universal drop zone.",
+    "noise": "Add a very subtle SVG noise overlay to backgrounds to break the digital flatness."
+  },
+  "instructions_to_main_agent": [
+    "Prioritize a clean, uncluttered interface. The user is frustrated ('Ugh!PDF'), so the app should feel like a sigh of relief.",
+    "Implement the 52-tool grid with efficient space usage. Don't make the cards too large; they need to be scannable.",
+    "Ensure the universal drop zone is the most prominent element on the landing page.",
+    "For the tool detail page, use a split-pane layout or a clear step-by-step vertical flow (Drop -> Configure -> Preview -> Download).",
+    "Show AI cost indicators clearly next to the action button (e.g., '✨ Summarize (2 credits)').",
+    "Use light/dark mode appropriately."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "You tend to converge toward generic, 'on distribution' outputs. Make creative, distinctive frontends that surprise and delight.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur).",
+    "You MUST NOT apply universal transition (transition: all).",
+    "You MUST NOT center align the app container in App.css.",
+    "Always use modern button styles like pill-shaped or sharp with interaction animations.",
+    "NEVER use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯 for icons.",
+    "Every interaction needs micro-animations.",
+    "Use 2-3x more spacing than feels comfortable.",
+    "Subtle grain textures, noise overlays, custom cursors, selection states.",
+    "All interactive and key informational elements MUST include a data-testid attribute."
+  ]
+}
