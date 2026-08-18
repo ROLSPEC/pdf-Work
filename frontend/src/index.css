@@ -38,24 +38,24 @@
     --grape: 268 63% 60%;
   }
   .dark {
-    --background: 0 0% 7%;
+    --background: 220 7% 9%;          /* soft neutral charcoal, not pure black */
     --foreground: 43 41% 93%;
-    --card: 0 0% 11%;
+    --card: 220 6% 13%;               /* a touch lighter for panel separation */
     --card-foreground: 43 41% 93%;
-    --popover: 0 0% 11%;
+    --popover: 220 6% 13%;
     --popover-foreground: 43 41% 93%;
     --primary: 56 89% 61%;
     --primary-foreground: 0 0% 7%;
-    --secondary: 0 0% 15%;
+    --secondary: 220 5% 17%;
     --secondary-foreground: 43 41% 93%;
-    --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 65%;
+    --muted: 220 5% 17%;
+    --muted-foreground: 43 10% 68%;
     --accent: 3 100% 59%;
     --accent-foreground: 0 0% 100%;
     --destructive: 3 100% 59%;
     --destructive-foreground: 0 0% 100%;
-    --border: 43 41% 93%;
-    --input: 43 41% 93%;
+    --border: 43 22% 82%;             /* slightly softened off-white border */
+    --input: 43 22% 82%;
     --ring: 56 89% 61%;
   }
 }

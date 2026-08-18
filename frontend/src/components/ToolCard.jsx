@@ -5,7 +5,7 @@ import { Lock, Cloud } from "@phosphor-icons/react";
 const CAT_STYLES = {
   convert:  { bg: "hsl(0 0% 100%)",           fg: "hsl(0 0% 7%)" },
   organize: { bg: "hsl(56 89% 61% / 0.55)",   fg: "hsl(0 0% 7%)" },
-  optimize: { bg: "hsl(0 0% 100%)",           fg: "hsl(0 0% 7%)" },
+  optimize: { bg: "hsl(38 92% 50% / 0.30)",   fg: "hsl(0 0% 7%)" },
   edit:     { bg: "hsl(56 89% 61% / 0.35)",   fg: "hsl(0 0% 7%)" },
   security: { bg: "hsl(3 100% 59% / 0.2)",    fg: "hsl(0 0% 7%)" },
   search:   { bg: "hsl(0 0% 7%)",             fg: "hsl(0 0% 100%)" },
