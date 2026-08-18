@@ -417,11 +417,13 @@ async def generic_stub(tool_id: str, file: UploadFile = File(...), user=Depends(
     return _pdf_response(data, f"{tool_id}-{file.filename}")
 
 
-# ============ Billing (Stripe geo-priced + Razorpay for India) ============
+# ============ Billing (Stripe + Razorpay + PayPal) ============
 from billing import build_router as _billing_router
 from razorpay_gw import build_router as _razorpay_router, rzp_available
+from paypal_gw import build_router as _paypal_router, paypal_available
 api.include_router(_billing_router(db, get_current_user))
 api.include_router(_razorpay_router(db, get_current_user))
+api.include_router(_paypal_router(db, get_current_user))
 
 
 @api.get("/billing/methods")
@@ -432,8 +434,15 @@ async def billing_methods(request: Request):
     currency, symbol = resolve_currency(country)
     stripe_on = bool(os.environ.get("STRIPE_API_KEY") or os.environ.get("STRIPE_SECRET_KEY"))
     razorpay_on = rzp_available()
-    # For India: prefer Razorpay (INR is native, no FX). Otherwise Stripe.
-    recommended = "razorpay" if (country == "IN" and razorpay_on) else ("stripe" if stripe_on else None)
+    paypal_on = paypal_available()
+    if country == "IN" and razorpay_on:
+        recommended = "razorpay"
+    elif stripe_on:
+        recommended = "stripe"
+    elif paypal_on:
+        recommended = "paypal"
+    else:
+        recommended = None
     return {
         "country": country,
         "currency": currency.upper(),
@@ -447,6 +456,9 @@ async def billing_methods(request: Request):
             {"id": "razorpay", "name": "Razorpay", "available": razorpay_on,
              "methods": ["card", "upi", "netbanking", "wallets"],
              "currencies": ["INR"]},
+            {"id": "paypal", "name": "PayPal", "available": paypal_on,
+             "methods": ["paypal", "wallet", "venmo"],
+             "currencies": ["USD", "GBP", "EUR", "CAD", "AUD"]},
         ],
     }
 

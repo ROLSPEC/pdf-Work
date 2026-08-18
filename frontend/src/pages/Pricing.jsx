@@ -99,11 +99,66 @@ export default function Pricing() {
     });
   };
 
+  const unlockPayPal = async () => {
+    // Get client id + create order on our server
+    const { data: pp } = await api.get("/billing/paypal/available");
+    if (!pp.available) throw new Error("PayPal not configured");
+    const { data: order } = await api.post("/billing/paypal/order", { amount: 1.0, currency: methods.currency });
+    // Load PayPal SDK for the client_id (needed to render Checkout button; here we redirect to hosted approval URL)
+    // Modern approach: use the JS SDK button. Simpler: open the approval link.
+    const sdkParams = new URLSearchParams({
+      "client-id": pp.client_id,
+      "currency": methods.currency,
+      "intent": "capture",
+    });
+    await loadScript(`https://www.paypal.com/sdk/js?${sdkParams.toString()}`);
+    return new Promise((resolve, reject) => {
+      const holderId = "paypal-button-holder";
+      let holder = document.getElementById(holderId);
+      if (!holder) {
+        holder = document.createElement("div");
+        holder.id = holderId;
+        holder.style.position = "fixed";
+        holder.style.inset = "0";
+        holder.style.background = "rgba(0,0,0,0.7)";
+        holder.style.display = "flex";
+        holder.style.alignItems = "center";
+        holder.style.justifyContent = "center";
+        holder.style.zIndex = "9999";
+        holder.innerHTML = '<div id="paypal-inner" style="background:#fff;padding:24px;border:2px solid #111;box-shadow:6px 6px 0 #111;min-width:340px;max-width:420px"><div style="font-family:monospace;text-transform:uppercase;letter-spacing:.15em;font-size:12px;font-weight:bold;margin-bottom:12px;color:#111">Pay with PayPal</div><div id="paypal-btns"></div><button id="paypal-cancel" style="margin-top:12px;width:100%;padding:10px;font-family:monospace;font-size:11px;text-transform:uppercase;letter-spacing:.15em;font-weight:bold;border:2px solid #111;background:#fff;cursor:pointer">Cancel</button></div>';
+        document.body.appendChild(holder);
+      }
+      const cancel = document.getElementById("paypal-cancel");
+      const cleanup = () => { holder.remove(); };
+      cancel.onclick = () => { cleanup(); reject(new Error("Payment cancelled")); };
+      window.paypal.Buttons({
+        createOrder: () => order.order_id,
+        onApprove: async (data) => {
+          try {
+            await api.post("/billing/paypal/capture", { order_id: data.orderID });
+            await refresh();
+            cleanup();
+            toast.success("You're a lifer! 🎉");
+            nav("/unlocked");
+            resolve();
+          } catch (e) {
+            cleanup();
+            toast.error("Capture failed: " + (e?.response?.data?.detail || e.message));
+            reject(e);
+          }
+        },
+        onCancel: () => { cleanup(); reject(new Error("Payment cancelled")); },
+        onError: (err) => { cleanup(); reject(err); },
+      }).render("#paypal-btns");
+    });
+  };
+
   const unlock = async () => {
     if (!user) { nav("/signup"); return; }
     setBusy(true);
     try {
       if (gateway === "razorpay") await unlockRazorpay();
+      else if (gateway === "paypal") await unlockPayPal();
       else await unlockStripe();
     } catch (e) {
       if (e?.message !== "Payment cancelled") toast.error(e?.response?.data?.detail || "Checkout failed");
@@ -112,6 +167,7 @@ export default function Pricing() {
 
   const stripeCard = methods.gateways.find((g) => g.id === "stripe");
   const razorpayCard = methods.gateways.find((g) => g.id === "razorpay");
+  const paypalCard = methods.gateways.find((g) => g.id === "paypal");
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-16 paper-grid">
@@ -169,7 +225,7 @@ export default function Pricing() {
           {/* Payment gateway selector */}
           <div className="mt-6 space-y-2" data-testid="gateway-selector">
             <div className="text-[10px] font-mono uppercase tracking-widest font-bold">Pay with</div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <GatewayOption
                 id="stripe" name="Stripe" available={stripeCard?.available}
                 methods={stripeCard?.methods || []} selected={gateway === "stripe"}
@@ -180,10 +236,20 @@ export default function Pricing() {
                 methods={razorpayCard?.methods || []} selected={gateway === "razorpay"}
                 onClick={() => setGateway("razorpay")} testId="opt-razorpay"
               />
+              <GatewayOption
+                id="paypal" name="PayPal" available={paypalCard?.available}
+                methods={paypalCard?.methods || []} selected={gateway === "paypal"}
+                onClick={() => setGateway("paypal")} testId="opt-paypal"
+              />
             </div>
             {!razorpayCard?.available && (
               <p className="text-[10px] font-mono uppercase tracking-widest opacity-80" data-testid="razorpay-unavailable">
-                Razorpay not configured on this server — Stripe will be used
+                Razorpay not configured on this server
+              </p>
+            )}
+            {!paypalCard?.available && (
+              <p className="text-[10px] font-mono uppercase tracking-widest opacity-80" data-testid="paypal-unavailable">
+                PayPal not configured on this server
               </p>
             )}
           </div>
@@ -197,7 +263,7 @@ export default function Pricing() {
             {user?.plan === "lifetime" ? "You're a lifer 🎉" : (busy ? "…" : `Unlock lifetime · ${methods.display}`)}
           </button>
           <p className="text-[10px] font-mono uppercase tracking-widest text-center mt-3">
-            Stripe: $1 · £1 · €1 · C$1 · A$1 · NZ$1 · Razorpay: ₹1 UPI · Card
+            Stripe: $1 · £1 · €1 · C$1 · A$1 · NZ$1 · Razorpay: ₹1 UPI · PayPal: $1 wallet
           </p>
         </div>
       </div>

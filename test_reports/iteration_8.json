@@ -1,0 +1,37 @@
+{
+  "summary": "Iter 8: PayPal Orders v2 REST integration verified end-to-end in unconfigured state. Extended backend suite from 52 → 56 tests (added 4 PayPal endpoint tests + updated billing/methods shape test to expect 3 gateways). All 56 tests pass (100%). Frontend Pricing page verified: grid-cols-3 with opt-stripe, opt-razorpay (dim opacity=0.5), opt-paypal (dim opacity=0.5); both razorpay-unavailable and paypal-unavailable notices render simultaneously; unlock-btn labelled 'Unlock lifetime · $1'; geo=US, paid-price=$1. Regressions all green: Stripe checkout, semantic pdf-search, all 45 non-search tools, auth, user_jobs, razorpay 503s.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Landing/Unlocked/DropZone/Pricing", "issue": "Copy still says '45 tools' / '01 / 45' / 'All 12 in-browser tools' — should be updated to 46 tools now that pdf-search was added. Carried over from iter 7, still not fixed.", "selector": "n/a", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ughpdf_backend.py",
+    "/app/test_reports/pytest/iter8.xml",
+    "/app/test_reports/pricing_iter8.png"
+  ],
+  "action_items": [
+    "Non-blocking: bump '45 tools' / '12 in-browser tools' copy across Landing.jsx, Unlocked.jsx, DropZone.jsx, Pricing.jsx (carried from iter 7).",
+    "When real PAYPAL_CLIENT_ID/SECRET are provided, re-run iter 8 tests — the 503 assertions in test_paypal_order/capture_503_when_unconfigured will need to be flipped to real order/400 tests. paypal_webhook_ignored also becomes 200 with signature-verified path."
+  ],
+  "critical_code_review_comments": [
+    "paypal_gw.py: capture endpoint returns 400 on any PayPal error (including a well-formed 404 bad-order-id) — acceptable per spec. Idempotent grant guarded by `payment_status != paid` conditional update — good.",
+    "paypal_gw.py: uses user['_id'] in reference_id and PayPal-Request-Id — ensures idempotency across retries. Good.",
+    "paypal_gw.py: webhook returns {status:'ignored'} when unavailable (200 OK) — matches spec; when configured and PAYPAL_WEBHOOK_ID unset it silently skips verification and processes events. Consider requiring PAYPAL_WEBHOOK_ID when paypal_available()==True to avoid a spoofable ingestion path in production.",
+    "server.py /billing/methods: recommended order (razorpay for IN → stripe → paypal → null) is fine; PayPal never becomes 'recommended' unless both Stripe and Razorpay are down.",
+    "Pricing.jsx: opt-razorpay/opt-paypal use opacity=0.5 CSS visual disable but no `disabled` attr on the underlying button — selection is prevented via `available` check inside GatewayOption. That's fine for a11y as long as aria-disabled is also set (verify)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ughpdf_backend.py"
+  ],
+  "success_rate": {"backend": "100% (56/56)", "frontend": "100% for gateway-selector 3-tile UI"},
+  "test_credentials": "test1@ughpdf.com / testpass123 (Free); life_* auto-created lifetime users via /api/billing/mock-unlock in fixtures.",
+  "seed_data_creation": "None persistent — ephemeral users with random hex suffixes.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test.py now has 56 tests. New PayPal-unavailable tests: test_paypal_available_false, test_paypal_order_503_when_unconfigured, test_paypal_capture_503_when_unconfigured, test_paypal_webhook_ignored_when_unconfigured. billing/methods shape test expects exactly 3 gateway ids {stripe, razorpay, paypal}. If PayPal keys get added, flip the 503 tests. FastEmbed model still downloads on first pdf-search call after container restart (~30s cold start).",
+  "rca of the issue": "N/A — no regressions."
+}

@@ -592,13 +592,47 @@ def test_billing_methods_shape():
     for k in ("country", "currency", "symbol", "display", "recommended", "gateways"):
         assert k in d, f"missing {k}"
     ids = {g["id"] for g in d["gateways"]}
-    assert ids == {"stripe", "razorpay"}
+    assert ids == {"stripe", "razorpay", "paypal"}
     by_id = {g["id"]: g for g in d["gateways"]}
     assert by_id["stripe"]["available"] is True
     assert by_id["razorpay"]["available"] is False
+    assert by_id["paypal"]["available"] is False
+    assert "paypal" in by_id["paypal"]["methods"]
+    assert "USD" in by_id["paypal"]["currencies"]
     # Non-IN → recommended stripe
     if d["country"] != "IN":
         assert d["recommended"] == "stripe"
+
+
+# ================= PAYPAL (unavailable) =================
+def test_paypal_available_false():
+    r = requests.get(f"{API}/billing/paypal/available")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["available"] is False
+    assert d.get("client_id", "") == ""
+    assert d.get("mode") in ("sandbox", "live")
+
+
+def test_paypal_order_503_when_unconfigured(life_headers):
+    r = requests.post(f"{API}/billing/paypal/order",
+                      headers=life_headers,
+                      json={"amount": 1.0, "currency": "USD"})
+    assert r.status_code == 503, r.text
+    assert "not configured" in r.text.lower()
+
+
+def test_paypal_capture_503_when_unconfigured(life_headers):
+    r = requests.post(f"{API}/billing/paypal/capture",
+                      headers=life_headers,
+                      json={"order_id": "BADORDER"})
+    assert r.status_code == 503, r.text
+
+
+def test_paypal_webhook_ignored_when_unconfigured():
+    r = requests.post(f"{API}/webhook/paypal", json={"event_type": "PAYMENT.CAPTURE.COMPLETED", "resource": {"id": "x"}})
+    assert r.status_code == 200, r.text
+    assert r.json().get("status") == "ignored"
 
 
 def test_razorpay_available_false():
