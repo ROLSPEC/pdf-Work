@@ -595,7 +595,7 @@ def test_billing_methods_shape():
     assert ids == {"stripe", "razorpay", "paypal"}
     by_id = {g["id"]: g for g in d["gateways"]}
     assert by_id["stripe"]["available"] is True
-    assert by_id["razorpay"]["available"] is False
+    assert by_id["razorpay"]["available"] is True
     assert by_id["paypal"]["available"] is False
     assert "paypal" in by_id["paypal"]["methods"]
     assert "USD" in by_id["paypal"]["currencies"]
@@ -635,24 +635,111 @@ def test_paypal_webhook_ignored_when_unconfigured():
     assert r.json().get("status") == "ignored"
 
 
-def test_razorpay_available_false():
+def test_razorpay_available_true():
     r = requests.get(f"{API}/billing/razorpay/available")
     assert r.status_code == 200
     d = r.json()
-    assert d["available"] is False
-    assert d.get("key_id", "") == ""
+    assert d["available"] is True
+    assert d.get("key_id", "").startswith("rzp_test_")
 
 
-def test_razorpay_order_503_when_unconfigured(life_headers):
+def test_razorpay_order_creates_real_order(life_headers):
     r = requests.post(f"{API}/billing/razorpay/order",
                       headers=life_headers,
                       json={"amount": 100, "currency": "INR"})
-    assert r.status_code == 503, r.text
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["order_id"].startswith("order_"), d
+    assert d["amount"] == 100
+    assert d["currency"] == "INR"
+    assert d["key_id"].startswith("rzp_test_")
+    assert d["display"] == "₹1"
+    # Verify a payment_transactions record was inserted
+    import pymongo as _pm
+    mongo_url = os.environ.get("MONGO_URL")
+    db_name = os.environ.get("DB_NAME")
+    if not mongo_url or not db_name:
+        with open("/app/backend/.env") as f:
+            for line in f:
+                if line.startswith("MONGO_URL") and not mongo_url:
+                    mongo_url = line.split("=", 1)[1].strip().strip('"')
+                if line.startswith("DB_NAME") and not db_name:
+                    db_name = line.split("=", 1)[1].strip().strip('"')
+    cli = _pm.MongoClient(mongo_url)
+    tx = cli[db_name].payment_transactions.find_one({"session_id": d["order_id"]})
+    assert tx is not None, "payment_transactions record not created"
+    assert tx["gateway"] == "razorpay"
+    assert tx["status"] == "initiated"
+    assert tx["payment_status"] == "pending"
 
 
-def test_razorpay_verify_503_when_unconfigured(life_headers):
+def test_razorpay_verify_bad_signature(life_headers):
+    # Create real order first
+    ro = requests.post(f"{API}/billing/razorpay/order",
+                       headers=life_headers, json={"amount": 100, "currency": "INR"})
+    assert ro.status_code == 200
+    order_id = ro.json()["order_id"]
     r = requests.post(f"{API}/billing/razorpay/verify",
                       headers=life_headers,
-                      json={"razorpay_order_id": "order_x", "razorpay_payment_id": "pay_x",
-                            "razorpay_signature": "sig_x"})
-    assert r.status_code == 503, r.text
+                      json={"razorpay_order_id": order_id, "razorpay_payment_id": "pay_fake",
+                            "razorpay_signature": "deadbeef"})
+    assert r.status_code == 400, r.text
+    assert "invalid signature" in r.text.lower()
+
+
+def test_razorpay_verify_valid_signature_grants_lifetime():
+    import hmac as _hmac, hashlib as _h
+    # Fresh user (so plan starts != lifetime — actually mock-unlock sets it; use signup only)
+    email = f"rzp_{uuid.uuid4().hex[:8]}@ughpdf.com"
+    r = requests.post(f"{API}/auth/signup", json={"email": email, "password": "testpass123", "name": "R"})
+    assert r.status_code == 200
+    tok = r.json()["token"]
+    hdr = {"Authorization": f"Bearer {tok}"}
+    # Create order
+    ro = requests.post(f"{API}/billing/razorpay/order", headers=hdr,
+                       json={"amount": 100, "currency": "INR"})
+    assert ro.status_code == 200, ro.text
+    order_id = ro.json()["order_id"]
+    # Compute valid signature
+    secret = "7Lsy6FrPa4oN4qKuAMbHQve7"
+    # Try to read from .env if changed
+    try:
+        with open("/app/backend/.env") as f:
+            for line in f:
+                if line.startswith("RAZORPAY_KEY_SECRET"):
+                    secret = line.split("=", 1)[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    payment_id = "pay_TESTFAKE12345"
+    payload = f"{order_id}|{payment_id}".encode()
+    sig = _hmac.new(secret.encode(), payload, _h.sha256).hexdigest()
+    v = requests.post(f"{API}/billing/razorpay/verify", headers=hdr,
+                      json={"razorpay_order_id": order_id, "razorpay_payment_id": payment_id,
+                            "razorpay_signature": sig})
+    assert v.status_code == 200, v.text
+    assert v.json().get("ok") is True
+    assert v.json().get("plan") == "lifetime"
+    # User plan updated
+    me = requests.get(f"{API}/auth/me", headers=hdr).json()
+    assert me["plan"] == "lifetime"
+    # Idempotent — call again
+    v2 = requests.post(f"{API}/billing/razorpay/verify", headers=hdr,
+                       json={"razorpay_order_id": order_id, "razorpay_payment_id": payment_id,
+                             "razorpay_signature": sig})
+    assert v2.status_code == 200, v2.text
+
+
+def test_razorpay_webhook_no_secret_configured():
+    r = requests.post(f"{API}/webhook/razorpay", json={"event": "payment.captured"})
+    assert r.status_code == 200, r.text
+    assert r.json().get("status") == "no webhook secret configured"
+
+
+def test_billing_methods_in_geo_recommends_razorpay():
+    # India IP (Airtel India range 122.176.*)
+    headers = {"CF-IPCountry": "IN", "X-Forwarded-For": "122.176.10.10"}
+    r = requests.get(f"{API}/billing/methods", headers=headers)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    if d.get("country") == "IN":
+        assert d["recommended"] == "razorpay", d
