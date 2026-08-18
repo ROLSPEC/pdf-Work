@@ -6,6 +6,7 @@ export const CATEGORIES = [
   { id: "optimize", name: "Optimize", color: "#F59E0B", desc: "5 tools to shrink & fix" },
   { id: "edit", name: "Edit", color: "#8B5CF6", desc: "9 tools to modify content" },
   { id: "security", name: "Security", color: "#EF4444", desc: "8 tools to protect & sign" },
+  { id: "search", name: "Search", color: "#0EA5E9", desc: "Semantic search inside PDFs" },
 ];
 
 // engine: "local" (in browser), "server" (backend)
@@ -64,6 +65,9 @@ export const TOOLS = [
   { id: "esign-request", name: "Send for Sign", cat: "security", engine: "server", desc: "Request others" },
   { id: "compare", name: "Compare PDFs", cat: "security", engine: "server", desc: "Pixel diff" },
   { id: "certify", name: "Certify PDF", cat: "security", engine: "server", desc: "Anti-tamper" },
+
+  // SEARCH (1)
+  { id: "pdf-search", name: "Semantic Search", cat: "search", engine: "server", desc: "Find similar text · no LLM" },
 ];
 
 export const TOOL_MAP = Object.fromEntries(TOOLS.map((t) => [t.id, t]));

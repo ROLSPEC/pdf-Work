@@ -74,6 +74,7 @@ export default function ToolPage() {
       fd.append("file", files[0]);
       Object.entries(opts).forEach(([k, v]) => v != null && fd.append(k, v));
       const endpoint = pickEndpoint(tool);
+      const isJson = tool.id === "pdf-search";
       setProgress(45);
       const resp = await fetch(`${API}${endpoint}`, {
         method: "POST",
@@ -86,9 +87,14 @@ export default function ToolPage() {
         let msg = t; try { msg = JSON.parse(t).detail || msg; } catch { }
         throw new Error(msg || `HTTP ${resp.status}`);
       }
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      setResult({ kind: "file", url, name: `${tool.id}-${files[0].name}` });
+      if (isJson) {
+        const data = await resp.json();
+        setResult({ kind: "json", data });
+      } else {
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        setResult({ kind: "file", url, name: `${tool.id}-${files[0].name}` });
+      }
       setProgress(100);
       toast.success("Done!");
       refresh();
@@ -172,6 +178,27 @@ export default function ToolPage() {
                   <Download size={14} weight="bold" /> Download {result.name}
                 </a>
               )}
+              {result.kind === "json" && tool.id === "pdf-search" && (
+                <div>
+                  <div className="text-[10px] font-mono uppercase tracking-widest font-bold mb-2">
+                    ↳ {result.data.n_results} matches · {result.data.n_chunks_total} chunks · {result.data.embedding_model}
+                  </div>
+                  <div className="space-y-2 max-h-[520px] overflow-auto pr-1">
+                    {result.data.results.map((r, i) => (
+                      <div key={i} className="brut-sm bg-card p-3" data-testid={`search-result-${i}`}>
+                        <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-widest font-bold">
+                          <span>#{i + 1} · [p.{r.page}]</span>
+                          <span className="opacity-60">score {r.score}</span>
+                        </div>
+                        <p className="text-xs mt-2 font-medium">{r.text}</p>
+                      </div>
+                    ))}
+                    {result.data.results.length === 0 && (
+                      <p className="text-sm font-medium text-muted-foreground">No matches for that query.</p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -209,7 +236,7 @@ export default function ToolPage() {
 function parseRanges(s) { return s.split(",").map((p) => { const [a, b] = p.split("-").map((x) => parseInt(x.trim(), 10)); return [a || 1, b || a || 1]; }); }
 function parsePages(s) { return s.split(",").map((x) => parseInt(x.trim(), 10)).filter(Boolean); }
 function pickEndpoint(tool) {
-  const direct = new Set(["protect", "unlock", "flatten", "repair", "pdf-to-text", "pdf-to-markdown", "bates"]);
+  const direct = new Set(["protect", "unlock", "flatten", "repair", "pdf-to-text", "pdf-to-markdown", "bates", "pdf-search"]);
   return direct.has(tool.id) ? `/tools/${tool.id}/run` : `/tools/${tool.id}/run-generic`;
 }
 
@@ -251,6 +278,13 @@ function ToolConfig({ tool, opts, setOpts }) {
     <div className="grid grid-cols-2 gap-3">
       {wrap("Prefix", <Input value={opts.prefix || ""} placeholder="BATES" onChange={(e) => set("prefix", e.target.value)} className={inputCls} data-testid="opt-prefix" />)}
       {wrap("Start #", <Input type="number" value={opts.start || ""} placeholder="1" onChange={(e) => set("start", e.target.value)} className={inputCls} data-testid="opt-start" />)}
+    </div>
+  );
+  if (tool.id === "pdf-search") return (
+    <div className="space-y-3">
+      {wrap("Search query", <Input value={opts.query || ""} placeholder="e.g. quarterly revenue" onChange={(e) => set("query", e.target.value)} className={inputCls} data-testid="opt-query" />)}
+      {wrap("How many results (1-20)",
+        <Input type="number" min={1} max={20} value={opts.k || "8"} onChange={(e) => set("k", e.target.value)} className={inputCls} data-testid="opt-k" />)}
     </div>
   );
   return null;

@@ -1,0 +1,39 @@
+{
+  "summary": "Iter 7: Regressed + extended backend tests to 52 passing (added 10 new: pdf-search basic/paraphrase/empty-query/k-clamps/cache+TTL/job-log, billing/methods shape, razorpay available=false, razorpay order/verify 503). Frontend verified: /pricing shows gateway-selector with opt-stripe + opt-razorpay (razorpay disabled), paid-price $1, geo=US, unlock-btn labelled 'Unlock lifetime · $1'. /t/pdf-search renders Semantic Search title, opt-query/opt-k inputs, file upload → search-result-0..N cards showing page, score, snippet; model reported as baai/bge-small-en-v1.5. Semantic paraphrase works ('earnings' → p.3, 'company leader' → p.1).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Pricing/GatewayCard", "issue": "data-testid='razorpay-unavailable' message never renders because the message is gated behind `gateway === 'razorpay' && !available`, but the Razorpay button is disabled (dim=true) so it can never be selected. The 'unavailable' subtext inside the card itself does render, but the explicit testid element does not. Either (a) render the razorpay-unavailable message unconditionally when the gateway is unavailable, or (b) allow selecting razorpay and let the message explain fallback.", "selector": "[data-testid='razorpay-unavailable']", "priority": "LOW"},
+      {"component": "Landing/Unlocked/DropZone/Pricing", "issue": "Copy still says '45 tools' / '01 / 45' / 'All 12 in-browser tools' — should be updated to 46 tools now that pdf-search was added (search category also new).", "selector": "n/a", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ughpdf_backend.py",
+    "/app/test_reports/pytest/iter7.xml"
+  ],
+  "action_items": [
+    "Optional UX: make data-testid='razorpay-unavailable' render whenever the razorpay gateway is not available (currently unreachable because the option is disabled and cannot be selected).",
+    "Copy update: bump '45 tools' references to '46 tools' across Landing.jsx, Unlocked.jsx, DropZone.jsx, and the '12 in-browser tools' phrase in Pricing.jsx free-card feature list."
+  ],
+  "critical_code_review_comments": [
+    "server.py: pdf-search route rounds scores to 3 decimals which is fine, but the spec asked for floats in [-1,1]. All good — verified in tests.",
+    "razorpay_gw.py: verify endpoint reads RAZORPAY_KEY_SECRET assuming rzp_available() gate; safe. HMAC uses compare_digest — good.",
+    "rag.py: fastembed model is warmed at startup via asyncio.to_thread; but heavy blocking model download on first call may extend cold start. Consider a health-gate.",
+    "server.py duplicates FILE_TTL_HOURS with rag.py (both read env) — acceptable but risks drift."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ughpdf_backend.py"
+  ],
+  "success_rate": {"backend": "100% (52/52)", "frontend": "100% for core flows (pricing gateway selector + pdf-search end-to-end)"},
+  "test_credentials": "test1@ughpdf.com / testpass123 (Free); ad-hoc lifetime users created via /api/billing/mock-unlock in tests.",
+  "seed_data_creation": "None persistent — tests create ephemeral users (test_/life_/iso_/big_/lim_/co_/pay_/delall_) with random hex suffixes.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test.py now has 52 tests covering pdf-search (semantic + cache + TTL) and Razorpay endpoints in unavailable state. If RAZORPAY_KEY_ID gets set, the '503 when unconfigured' tests need to be adjusted, and add a real order-creation test. FastEmbed model downloads once (~30MB) — first pdf-search call after container restart may be slow. Screenshots saved at /app/test_reports/pricing.png and /app/test_reports/tool-search.png.",
+  "rca of the issue": "N/A — no regressions; only minor UX copy staleness (45 vs 46) and a dead code path for razorpay-unavailable testid."
+}

@@ -377,6 +377,28 @@ async def run_strip_meta(file: UploadFile = File(...), user=Depends(get_current_
     return _pdf_response(pdf_ops.strip_metadata(data), f"clean-{file.filename}")
 
 
+@api.post("/tools/pdf-search/run")
+async def run_search(file: UploadFile = File(...), query: str = Form(...),
+                     k: int = Form(8), user=Depends(get_current_user)):
+    """Semantic search over a PDF — no LLM. Returns top-K chunks with page + score."""
+    if not query.strip():
+        raise HTTPException(400, "Query cannot be empty")
+    data = await _read_upload(file, user)
+    await _consume_op(user)
+    import rag
+    fh, chunks, matrix = await rag.get_or_build_index(db, data)
+    results = await rag.search(chunks, matrix, query, k=max(1, min(20, int(k))))
+    await _log_job(user, "pdf-search", file, len(data))
+    return {
+        "query": query,
+        "file_hash": fh,
+        "n_chunks_total": len(chunks),
+        "n_results": len(results),
+        "results": [{"page": r["page"], "score": round(r["score"], 3), "text": r["text"][:600]} for r in results],
+        "embedding_model": rag.EMBED_MODEL,
+    }
+
+
 # ============ Generic server-tool fallback ============
 @api.post("/tools/{tool_id}/run-generic")
 async def generic_stub(tool_id: str, file: UploadFile = File(...), user=Depends(get_current_user)):
@@ -395,9 +417,38 @@ async def generic_stub(tool_id: str, file: UploadFile = File(...), user=Depends(
     return _pdf_response(data, f"{tool_id}-{file.filename}")
 
 
-# ============ Billing (Stripe geo-priced) ============
+# ============ Billing (Stripe geo-priced + Razorpay for India) ============
 from billing import build_router as _billing_router
+from razorpay_gw import build_router as _razorpay_router, rzp_available
 api.include_router(_billing_router(db, get_current_user))
+api.include_router(_razorpay_router(db, get_current_user))
+
+
+@api.get("/billing/methods")
+async def billing_methods(request: Request):
+    """Report which payment gateways are enabled + the recommended one for the caller's country."""
+    from billing import _geo_country, resolve_currency
+    country = await _geo_country(request)
+    currency, symbol = resolve_currency(country)
+    stripe_on = bool(os.environ.get("STRIPE_API_KEY") or os.environ.get("STRIPE_SECRET_KEY"))
+    razorpay_on = rzp_available()
+    # For India: prefer Razorpay (INR is native, no FX). Otherwise Stripe.
+    recommended = "razorpay" if (country == "IN" and razorpay_on) else ("stripe" if stripe_on else None)
+    return {
+        "country": country,
+        "currency": currency.upper(),
+        "symbol": symbol,
+        "display": f"{symbol}1",
+        "recommended": recommended,
+        "gateways": [
+            {"id": "stripe", "name": "Stripe", "available": stripe_on,
+             "methods": ["card", "apple_pay", "google_pay", "link", "klarna", "afterpay"],
+             "currencies": ["USD", "CAD", "GBP", "EUR", "AUD", "NZD", "INR"]},
+            {"id": "razorpay", "name": "Razorpay", "available": razorpay_on,
+             "methods": ["card", "upi", "netbanking", "wallets"],
+             "currencies": ["INR"]},
+        ],
+    }
 
 
 # ============ Health ============
@@ -418,15 +469,22 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def _init_indexes():
-    """Ensure MongoDB TTL index so job records auto-expire after 24h."""
+    """Ensure MongoDB TTL index so job records auto-expire after 24h.
+    Also warm the fastembed model for the semantic-search tool."""
     try:
         await db.user_jobs.create_index("expires_at", expireAfterSeconds=0)
         await db.user_jobs.create_index([("user_id", 1), ("created_at", -1)])
-        log.info("user_jobs TTL + user_id indexes ensured")
-        # Drop any stale RAG cache from previous AI feature
-        await db.rag_indexes.drop()
+        await db.rag_indexes.create_index("expires_at", expireAfterSeconds=0)
+        log.info("user_jobs + rag_indexes TTL indexes ensured")
     except Exception as e:
         log.warning(f"index init warn: {e}")
+    # Warm embedder
+    try:
+        import asyncio, rag as _rag
+        await asyncio.to_thread(_rag.get_embedder)
+        log.info("Semantic search embedder warmed up")
+    except Exception as e:
+        log.warning(f"embedder warm-up failed: {e}")
 
 
 @app.on_event("shutdown")

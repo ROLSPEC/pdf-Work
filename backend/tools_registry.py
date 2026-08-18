@@ -55,6 +55,9 @@ TOOLS = [
     {"id": "esign-request", "name": "Send for Signature", "cat": "security", "engine": "server", "desc": "Request e-sign from others"},
     {"id": "compare", "name": "Compare PDFs", "cat": "security", "engine": "server", "desc": "Pixel-level diff of two PDFs"},
     {"id": "certify", "name": "Certify PDF", "cat": "security", "engine": "server", "desc": "Lock PDF against tampering"},
+
+    # ===== SEARCH (1) =====
+    {"id": "pdf-search", "name": "Semantic Search", "cat": "search", "engine": "server", "desc": "Find similar text in a PDF (no LLM)"},
 ]
 
 CATEGORIES = [
@@ -63,6 +66,7 @@ CATEGORIES = [
     {"id": "optimize", "name": "Optimize", "desc": "5 tools to shrink & fix", "color": "#F59E0B"},
     {"id": "edit", "name": "Edit", "desc": "9 tools to modify content", "color": "#8B5CF6"},
     {"id": "security", "name": "Security", "desc": "8 tools to protect & sign", "color": "#EF4444"},
+    {"id": "search", "name": "Search", "desc": "1 semantic search tool", "color": "#0EA5E9"},
 ]
 
 TOOL_MAP = {t["id"]: t for t in TOOLS}

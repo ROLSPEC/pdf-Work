@@ -71,7 +71,7 @@ export default function Unlocked() {
             <CheckCircle size={72} weight="bold" className="mx-auto text-primary-foreground" />
           </div>
           <h1 className="font-display text-5xl tracking-tighter mt-8">You're a lifer! 🎉</h1>
-          <p className="text-sm mt-3 font-medium">All 45 tools, 100 MB uploads, unlimited runs. Go make magic.</p>
+          <p className="text-sm mt-3 font-medium">All 46 tools, 100 MB uploads, unlimited runs. Go make magic.</p>
           <div className="flex gap-3 justify-center mt-8">
             <button onClick={() => nav("/dashboard")} data-testid="unlocked-dashboard"
               className="brut-sm brut-hover btn-ink px-5 py-3 font-mono text-xs uppercase tracking-widest font-bold">

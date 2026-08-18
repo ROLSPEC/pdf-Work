@@ -41,7 +41,7 @@ export default function Landing() {
           <div className="grid md:grid-cols-[1.2fr_1fr] gap-10 items-start">
             <div>
               <div className="brut-chip mb-6 sticker-rotate-l inline-flex" data-testid="hero-chip">
-                45 tools · $1 lifetime
+                46 tools · $1 lifetime
               </div>
               <h1 className="font-display text-5xl sm:text-6xl lg:text-7xl leading-[0.95] tracking-tighter">
                 Every PDF task,<br />
@@ -60,7 +60,7 @@ export default function Landing() {
                   data-testid="cta-browse"
                   style={{ backgroundColor: 'hsl(var(--foreground))', color: 'hsl(var(--background))' }}
                   className="brut brut-hover px-6 py-3 font-mono text-xs uppercase tracking-widest font-bold flex items-center gap-2">
-                  Browse 45 tools <ArrowRight size={14} weight="bold" />
+                  Browse 46 tools <ArrowRight size={14} weight="bold" />
                 </button>
                 <button onClick={() => nav("/pricing")}
                   data-testid="cta-unlock"
@@ -113,7 +113,7 @@ export default function Landing() {
       {/* SEARCH + CATS */}
       <section id="tools-grid" className="max-w-7xl mx-auto px-6 py-10">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="font-display text-3xl tracking-tighter">The 45 tools →</h2>
+          <h2 className="font-display text-3xl tracking-tighter">The 46 tools →</h2>
           <div className="text-xs font-mono uppercase tracking-widest text-muted-foreground">showing {filtered.length}</div>
         </div>
 

@@ -87,26 +87,29 @@ def test_health_root():
     assert r.status_code == 200
     d = r.json()
     assert d["app"] == "Ugh!PDF"
-    assert d["tools"] == 45, f"expected 45 tools, got {d['tools']}"
-    assert d["categories"] == 5
+    assert d["tools"] == 46, f"expected 46 tools, got {d['tools']}"
+    assert d["categories"] == 6
 
 
-def test_tools_list_45_5_no_ai():
+def test_tools_list_46_6_with_search():
     r = requests.get(f"{API}/tools")
     assert r.status_code == 200
     d = r.json()
-    assert len(d["categories"]) == 5
+    assert len(d["categories"]) == 6
     cat_ids = {c["id"] for c in d["categories"]}
     assert "ai" not in cat_ids
-    assert cat_ids == {"convert", "organize", "optimize", "edit", "security"}
-    assert len(d["tools"]) == 45
+    assert cat_ids == {"convert", "organize", "optimize", "edit", "security", "search"}
+    assert len(d["tools"]) == 46
     ids = {t["id"] for t in d["tools"]}
     # No AI tool id must appear
     ai_leaks = [i for i in ids if i.startswith("ai-")]
     assert ai_leaks == [], f"AI tool ids leaked: {ai_leaks}"
     # Core tools present
-    for must in ("merge", "protect", "unlock", "bates", "pdf-to-text", "pdf-to-markdown"):
+    for must in ("merge", "protect", "unlock", "bates", "pdf-to-text", "pdf-to-markdown", "pdf-search"):
         assert must in ids
+    # pdf-search is in search category
+    tools_by_id = {t["id"]: t for t in d["tools"]}
+    assert tools_by_id["pdf-search"]["cat"] == "search"
 
 
 def test_local_tools_registered():
@@ -430,3 +433,192 @@ def test_billing_checkout_real_stripe():
     d = r2.json()
     assert d["url"].startswith("https://checkout.stripe.com"), d["url"]
     assert d["session_id"].startswith("cs_")
+
+
+# ================= SEMANTIC SEARCH (pdf-search) =================
+def _multipage_pdf(pages_texts):
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=LETTER)
+    for t in pages_texts:
+        # split by lines so long text is drawn
+        y = 720
+        for line in t.split("\n"):
+            c.drawString(72, y, line[:110])
+            y -= 14
+        c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+@pytest.fixture(scope="session")
+def semantic_pdf():
+    return _multipage_pdf([
+        "Our CEO Sarah Kim leads the executive team and sets company vision and strategy.",
+        "The 2026 Roadmap outlines upcoming product features and platform milestones.",
+        "Financial margins profits and revenue growth for the fiscal year were strong.",
+    ])
+
+
+def test_pdf_search_basic(life_headers, semantic_pdf):
+    files = {"file": ("s.pdf", semantic_pdf, "application/pdf")}
+    r = requests.post(f"{API}/tools/pdf-search/run", headers=life_headers,
+                      files=files, data={"query": "credit card number", "k": 5}, timeout=120)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    for k in ("query", "file_hash", "n_chunks_total", "n_results", "results", "embedding_model"):
+        assert k in d
+    assert "bge-small-en-v1.5" in d["embedding_model"]
+    assert d["query"] == "credit card number"
+    assert isinstance(d["results"], list) and len(d["results"]) >= 1
+    for res in d["results"]:
+        assert isinstance(res["page"], int)
+        assert isinstance(res["score"], float)
+        assert -1.1 <= res["score"] <= 1.1
+        assert isinstance(res["text"], str) and len(res["text"]) > 0
+
+
+def test_pdf_search_semantic_paraphrase(life_headers, semantic_pdf):
+    """The whole point: paraphrased queries land on the right page."""
+    files = {"file": ("s.pdf", semantic_pdf, "application/pdf")}
+    # Query 'earnings' should rank page 3 (margins/profits)
+    r = requests.post(f"{API}/tools/pdf-search/run", headers=life_headers,
+                      files=files, data={"query": "earnings", "k": 3}, timeout=120)
+    assert r.status_code == 200, r.text
+    top_pages = [res["page"] for res in r.json()["results"]]
+    assert 3 in top_pages[:2], f"expected page 3 in top results for 'earnings', got {top_pages}"
+
+    # Query 'company leader' should rank page 1 (CEO Sarah Kim)
+    files = {"file": ("s.pdf", semantic_pdf, "application/pdf")}
+    r = requests.post(f"{API}/tools/pdf-search/run", headers=life_headers,
+                      files=files, data={"query": "company leader", "k": 3}, timeout=120)
+    assert r.status_code == 200
+    top_pages = [res["page"] for res in r.json()["results"]]
+    assert 1 in top_pages[:2], f"expected page 1 in top results for 'company leader', got {top_pages}"
+
+
+def test_pdf_search_empty_query_400(life_headers, sample_pdf):
+    files = {"file": ("s.pdf", sample_pdf, "application/pdf")}
+    r = requests.post(f"{API}/tools/pdf-search/run", headers=life_headers,
+                      files=files, data={"query": "  ", "k": 3})
+    assert r.status_code == 400
+
+
+def test_pdf_search_k_clamps(life_headers, semantic_pdf):
+    # k=1 -> exactly 1
+    files = {"file": ("s.pdf", semantic_pdf, "application/pdf")}
+    r = requests.post(f"{API}/tools/pdf-search/run", headers=life_headers,
+                      files=files, data={"query": "revenue", "k": 1}, timeout=120)
+    assert r.status_code == 200
+    assert len(r.json()["results"]) == 1
+
+    # k=99 -> clamped to <=20 (also <= n_chunks)
+    files = {"file": ("s.pdf", semantic_pdf, "application/pdf")}
+    r = requests.post(f"{API}/tools/pdf-search/run", headers=life_headers,
+                      files=files, data={"query": "revenue", "k": 99}, timeout=120)
+    assert r.status_code == 200
+    d = r.json()
+    assert len(d["results"]) <= 20
+    assert len(d["results"]) <= d["n_chunks_total"]
+
+    # k=0 -> clamped to 1
+    files = {"file": ("s.pdf", semantic_pdf, "application/pdf")}
+    r = requests.post(f"{API}/tools/pdf-search/run", headers=life_headers,
+                      files=files, data={"query": "revenue", "k": 0}, timeout=120)
+    assert r.status_code == 200
+    assert len(r.json()["results"]) == 1
+
+
+def test_pdf_search_cache_and_ttl_index(life_headers, semantic_pdf):
+    """Same PDF twice should reuse cached index; verify Mongo doc + TTL index."""
+    files = {"file": ("s.pdf", semantic_pdf, "application/pdf")}
+    r = requests.post(f"{API}/tools/pdf-search/run", headers=life_headers,
+                      files=files, data={"query": "first query", "k": 3}, timeout=120)
+    assert r.status_code == 200
+    fh1 = r.json()["file_hash"]
+
+    t0 = time.time()
+    files = {"file": ("s.pdf", semantic_pdf, "application/pdf")}
+    r = requests.post(f"{API}/tools/pdf-search/run", headers=life_headers,
+                      files=files, data={"query": "another different query", "k": 3}, timeout=60)
+    dt = time.time() - t0
+    assert r.status_code == 200
+    fh2 = r.json()["file_hash"]
+    assert fh1 == fh2
+
+    # Verify Mongo doc & TTL index
+    mongo_url = os.environ.get("MONGO_URL")
+    db_name = os.environ.get("DB_NAME")
+    if not mongo_url:
+        with open("/app/backend/.env") as f:
+            for line in f:
+                if line.startswith("MONGO_URL="):
+                    mongo_url = line.split("=", 1)[1].strip().strip('"').strip("'")
+                elif line.startswith("DB_NAME="):
+                    db_name = line.split("=", 1)[1].strip().strip('"').strip("'")
+    cli = pymongo.MongoClient(mongo_url)
+    doc = cli[db_name].rag_indexes.find_one({"_id": fh1})
+    assert doc is not None, "rag_indexes doc not cached"
+    assert doc.get("version") == 3
+    assert "bge-small-en-v1.5" in doc.get("model", "")
+    assert doc.get("dim") == 384
+    assert isinstance(doc.get("chunks"), list)
+    assert isinstance(doc.get("vectors"), list)
+    assert doc.get("expires_at") is not None
+    # ~24h out
+    created = doc.get("created_at")
+    if created:
+        diff = (doc["expires_at"] - created).total_seconds()
+        assert 23 * 3600 <= diff <= 25 * 3600
+
+    idx = list(cli[db_name].rag_indexes.list_indexes())
+    ttl = [i for i in idx if i.get("expireAfterSeconds") == 0 and "expires_at" in i["key"]]
+    assert ttl, f"no TTL index on rag_indexes.expires_at: {idx}"
+
+
+def test_pdf_search_logs_job(life_headers, semantic_pdf):
+    files = {"file": ("job.pdf", semantic_pdf, "application/pdf")}
+    r = requests.post(f"{API}/tools/pdf-search/run", headers=life_headers,
+                      files=files, data={"query": "revenue", "k": 2}, timeout=120)
+    assert r.status_code == 200
+    jobs = requests.get(f"{API}/user/jobs", headers=life_headers).json()["jobs"]
+    assert any(j["tool_id"] == "pdf-search" for j in jobs), "pdf-search job not logged"
+
+
+# ================= BILLING METHODS + RAZORPAY (unavailable) =================
+def test_billing_methods_shape():
+    r = requests.get(f"{API}/billing/methods")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    for k in ("country", "currency", "symbol", "display", "recommended", "gateways"):
+        assert k in d, f"missing {k}"
+    ids = {g["id"] for g in d["gateways"]}
+    assert ids == {"stripe", "razorpay"}
+    by_id = {g["id"]: g for g in d["gateways"]}
+    assert by_id["stripe"]["available"] is True
+    assert by_id["razorpay"]["available"] is False
+    # Non-IN → recommended stripe
+    if d["country"] != "IN":
+        assert d["recommended"] == "stripe"
+
+
+def test_razorpay_available_false():
+    r = requests.get(f"{API}/billing/razorpay/available")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["available"] is False
+    assert d.get("key_id", "") == ""
+
+
+def test_razorpay_order_503_when_unconfigured(life_headers):
+    r = requests.post(f"{API}/billing/razorpay/order",
+                      headers=life_headers,
+                      json={"amount": 100, "currency": "INR"})
+    assert r.status_code == 503, r.text
+
+
+def test_razorpay_verify_503_when_unconfigured(life_headers):
+    r = requests.post(f"{API}/billing/razorpay/verify",
+                      headers=life_headers,
+                      json={"razorpay_order_id": "order_x", "razorpay_payment_id": "pay_x",
+                            "razorpay_signature": "sig_x"})
+    assert r.status_code == 503, r.text

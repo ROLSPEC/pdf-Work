@@ -22,6 +22,7 @@ email-validator==2.3.0
 emergentintegrations==0.2.0
 execnet==2.1.2
 fastapi==0.110.1
+fastembed==0.8.0
 fastuuid==0.14.0
 filelock==3.32.2
 flake8==7.3.0
@@ -69,6 +70,7 @@ mypy==2.3.0
 mypy_extensions==1.1.0
 numpy==2.4.6
 oauthlib==3.3.1
+onnxruntime==1.29.0
 openai==1.99.9
 packaging==26.3
 pandas==3.0.5
@@ -102,6 +104,7 @@ python-jose==3.5.0
 python-multipart==0.0.32
 pytokens==0.4.1
 PyYAML==6.0.3
+razorpay==2.0.1
 referencing==0.37.0
 regex==2026.7.19
 reportlab==5.0.0
