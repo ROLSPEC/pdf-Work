@@ -3,12 +3,12 @@ import { Sparkle, Lock, Cloud } from "@phosphor-icons/react";
 
 // Inline style safeguards — some HSL vars weren't being picked up by Tailwind JIT
 const CAT_STYLES = {
-  convert:  { bg: "hsl(216 100% 74% / 0.4)",  fg: "hsl(var(--foreground))" },
-  organize: { bg: "hsl(71 88% 54% / 0.4)",    fg: "hsl(var(--foreground))" },
-  optimize: { bg: "hsl(45 100% 60% / 0.5)",   fg: "hsl(var(--foreground))" },
-  edit:     { bg: "hsl(268 63% 60% / 0.35)",  fg: "hsl(var(--foreground))" },
-  security: { bg: "hsl(10 100% 63% / 0.3)",   fg: "hsl(var(--foreground))" },
-  ai:       { bg: "hsl(10 100% 63%)",         fg: "hsl(0 0% 100%)" },
+  convert:  { bg: "hsl(0 0% 100%)",           fg: "hsl(0 0% 7%)" },   // white
+  organize: { bg: "hsl(56 89% 61% / 0.55)",   fg: "hsl(0 0% 7%)" },   // acid yellow tint
+  optimize: { bg: "hsl(0 0% 100%)",           fg: "hsl(0 0% 7%)" },   // white
+  edit:     { bg: "hsl(56 89% 61% / 0.35)",   fg: "hsl(0 0% 7%)" },   // yellow soft
+  security: { bg: "hsl(3 100% 59% / 0.2)",    fg: "hsl(0 0% 7%)" },   // red tint
+  ai:       { bg: "hsl(3 100% 59%)",          fg: "hsl(0 0% 100%)" }, // brutal red
 };
 
 const PLAN_TAG = (tool) => {

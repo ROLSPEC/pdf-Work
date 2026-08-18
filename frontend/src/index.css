@@ -11,52 +11,52 @@
 
 @layer base {
   :root {
-    /* Neo-Brutalist paper theme */
-    --background: 40 33% 96%;         /* #FAF7F2 */
-    --foreground: 240 5% 6%;          /* #0F0F10 */
-    --card: 0 0% 100%;
-    --card-foreground: 240 5% 6%;
+    /* Neo-Brutalist paper theme — user spec */
+    --background: 43 41% 93%;         /* #F4F0E6 warm off-white */
+    --foreground: 0 0% 7%;            /* #111111 almost black */
+    --card: 0 0% 100%;                /* #FFFFFF white surface */
+    --card-foreground: 0 0% 7%;
     --popover: 0 0% 100%;
-    --popover-foreground: 240 5% 6%;
-    --primary: 71 88% 54%;            /* #C6F31E electric lime */
-    --primary-foreground: 240 5% 6%;
-    --secondary: 40 20% 92%;
-    --secondary-foreground: 240 5% 6%;
-    --muted: 40 20% 92%;
-    --muted-foreground: 240 5% 40%;
-    --accent: 10 100% 63%;            /* #FF5B45 coral */
+    --popover-foreground: 0 0% 7%;
+    --primary: 56 89% 61%;            /* #F5E642 acid yellow */
+    --primary-foreground: 0 0% 7%;
+    --secondary: 43 30% 88%;
+    --secondary-foreground: 0 0% 7%;
+    --muted: 43 30% 88%;
+    --muted-foreground: 0 0% 33%;     /* #555555 charcoal */
+    --accent: 3 100% 59%;             /* #FF3B30 brutal red */
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 84% 60%;
+    --destructive: 3 100% 59%;        /* #FF3B30 same brutal red */
     --destructive-foreground: 0 0% 100%;
-    --border: 240 5% 6%;              /* ink */
-    --input: 240 5% 6%;
-    --ring: 71 88% 54%;
+    --border: 0 0% 7%;                /* #111 ink */
+    --input: 0 0% 7%;
+    --ring: 56 89% 61%;
     --radius: 0.5rem;
 
-    --sky: 216 100% 74%;              /* #7AB8FF */
-    --sun: 45 100% 60%;               /* butter yellow */
+    --sky: 216 100% 74%;
+    --sun: 56 89% 61%;                /* acid yellow reused */
     --grape: 268 63% 60%;
   }
   .dark {
-    --background: 240 5% 8%;
-    --foreground: 40 33% 96%;
-    --card: 240 5% 12%;
-    --card-foreground: 40 33% 96%;
-    --popover: 240 5% 12%;
-    --popover-foreground: 40 33% 96%;
-    --primary: 71 88% 54%;
-    --primary-foreground: 240 5% 6%;
-    --secondary: 240 5% 15%;
-    --secondary-foreground: 40 33% 96%;
-    --muted: 240 5% 15%;
-    --muted-foreground: 240 5% 65%;
-    --accent: 10 100% 63%;
+    --background: 0 0% 7%;
+    --foreground: 43 41% 93%;
+    --card: 0 0% 11%;
+    --card-foreground: 43 41% 93%;
+    --popover: 0 0% 11%;
+    --popover-foreground: 43 41% 93%;
+    --primary: 56 89% 61%;
+    --primary-foreground: 0 0% 7%;
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 43 41% 93%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 65%;
+    --accent: 3 100% 59%;
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 63% 55%;
+    --destructive: 3 100% 59%;
     --destructive-foreground: 0 0% 100%;
-    --border: 40 33% 96%;
-    --input: 40 33% 96%;
-    --ring: 71 88% 54%;
+    --border: 43 41% 93%;
+    --input: 43 41% 93%;
+    --ring: 56 89% 61%;
   }
 }
 
@@ -73,9 +73,6 @@
 
 /* ============= Neo-brutalist utilities ============= */
 @layer utilities {
-  .btn-ink { background-color: hsl(var(--foreground)); color: hsl(var(--background)); }
-  .btn-primary-ink { background-color: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
-  .btn-accent-ink { background-color: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
   .bg-ink { background-color: hsl(var(--foreground)); }
   .text-ink { color: hsl(var(--foreground)); }
   .bg-paper { background-color: hsl(var(--background)); }
@@ -90,6 +87,10 @@
     box-shadow: 4px 4px 0 0 hsl(var(--border));
     background: hsl(var(--card));
   }
+  /* IMPORTANT: btn-* MUST come AFTER .brut/.brut-sm so they override background */
+  .btn-ink { background-color: hsl(var(--foreground)) !important; color: hsl(var(--background)) !important; }
+  .btn-primary-ink { background-color: hsl(var(--primary)) !important; color: hsl(var(--primary-foreground)) !important; }
+  .btn-accent-ink { background-color: hsl(var(--accent)) !important; color: hsl(var(--accent-foreground)) !important; }
   .brut-hover {
     transition: transform 120ms ease, box-shadow 120ms ease;
   }

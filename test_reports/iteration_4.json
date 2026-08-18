@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 4 verified new Ugh!PDF color theme (acid yellow + brutal red on warm off-white) and confirmed the empty-buttons regression is fixed. Backend regression: 43/43 pytest pass (unchanged from iter 3). Frontend theme audit via computed styles on the live preview URL confirms all target data-testids now render with correct backgrounds and text colors in both light and dark modes.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/billing/checkout", "issue": "(still open from iter 2-3) webhook_url derived from request.base_url resolves to internal K8s URL; use PUBLIC_BASE_URL env instead."},
+      {"endpoint": "POST /api/tools/ai-chat/run", "issue": "(still open from iter 3) RAG index blob is pickled TfidfVectorizer stored as base64 in Mongo — fragile across sklearn versions."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Landing hero", "issues": ["Copy still says '53 tools' while tools registry returns 52 base tools (carried from iter 2/3, minor)."]},
+      {"screen": "/pricing", "issues": ["Free-plan card has no data-testid='free-card' (paid-card / unlock-btn / pricing-chip all present and correctly colored). Nice-to-have for parity."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ughpdf_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "index.css: btn-ink / btn-primary-ink / btn-accent-ink correctly moved AFTER .brut/.brut-sm and marked !important — this was the reported empty-buttons RCA and is now fixed (verified via computed styles on paid-card, unlock-btn, pricing-chip, cta-unlock, and all 8 AI tiles).",
+    "Actual acid-yellow computed value is rgb(244,232,67) (#F4E843) from HSL(56 89% 61%); requested was #F5E642. Off by 1-2 units per channel — perceptually identical. Not a bug, just noting.",
+    "hero highlight span containing 'in one clean spot' renders yellow visually (screenshot confirms) — my text-based selector couldn't isolate it because the H1 wraps multiple lines with a background utility on a child element; visual confirmation is fine."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (43/43)", "frontend": "100% for theme regression (all target selectors correct in light + dark)"},
+  "test_credentials": "test1@ughpdf.com / testpass123 (existing; login succeeded and redirected).",
+  "seed_data_creation": "None new (RAG rag_indexes entries from iter 3 persist harmlessly).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Theme palette locked in /app/frontend/src/index.css :root and .dark; btn-*-ink utilities are now positioned AFTER .brut with !important to defeat the background shorthand. Computed-style verification: body rgb(244,240,230); landing-paid-card + pricing paid-card rgb(244,232,67) yellow; cta-unlock + pricing-chip + all 8 tool-ai-* tiles rgb(255,56,46) red on white text; unlock-btn on pricing rgb(18,18,18) with cream text; dark-mode toggle flips body to rgb(18,18,18) and keeps accent colors. All 43 backend tests still green.",
+  "rca of the issue": "Original bug (empty-looking buttons/cards on /pricing and hero) — caused by CSS cascade order: .brut/.brut-sm used the `background:` shorthand which reset background-color, and was defined AFTER .btn-*-ink. Fix applied by main agent (moved .btn-*-ink after .brut + !important) is verified working via getComputedStyle on paid-card / unlock-btn / pricing-chip / cta-unlock — all now report the expected colored backgrounds instead of white/transparent."
+}
