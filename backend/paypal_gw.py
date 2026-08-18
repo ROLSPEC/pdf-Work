@@ -53,6 +53,8 @@ def build_router(db, get_current_user) -> APIRouter:
 
     @router.post("/billing/paypal/order")
     async def create_order(body: OrderIn, user=Depends(get_current_user)):
+        if user.get("plan") == "lifetime":
+            raise HTTPException(409, "You're already on lifetime — no purchase needed 🎉")
         if not paypal_available():
             raise HTTPException(503, "PayPal is not configured on this server")
         token = await _access_token()

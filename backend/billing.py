@@ -97,6 +97,8 @@ def build_router(db, get_current_user) -> APIRouter:
 
     @router.post("/billing/checkout")
     async def checkout(body: CheckoutIn, request: Request, user=Depends(get_current_user)):
+        if user.get("plan") == "lifetime":
+            raise HTTPException(409, "You're already on lifetime — no purchase needed 🎉")
         if not STRIPE_KEY:
             # Dev-mode fallback: mock unlock
             await db.users.update_one({"_id": user["_id"]}, {"$set": {"plan": "lifetime"}})
@@ -177,6 +179,8 @@ def build_router(db, get_current_user) -> APIRouter:
     @router.post("/billing/mock-unlock")
     async def mock_unlock(user=Depends(get_current_user)):
         """Dev helper: instantly unlock lifetime."""
+        if user.get("plan") == "lifetime":
+            return {"ok": True, "plan": "lifetime", "already": True}
         await db.users.update_one({"_id": user["_id"]}, {"$set": {"plan": "lifetime"}})
         return {"ok": True, "plan": "lifetime"}
 

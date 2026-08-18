@@ -155,13 +155,28 @@ export default function Pricing() {
 
   const unlock = async () => {
     if (!user) { nav("/signup"); return; }
+    if (user.plan === "lifetime") {
+      toast.success("You're already on lifetime — nothing to buy 🎉");
+      nav("/dashboard");
+      return;
+    }
     setBusy(true);
     try {
       if (gateway === "razorpay") await unlockRazorpay();
       else if (gateway === "paypal") await unlockPayPal();
       else await unlockStripe();
     } catch (e) {
-      if (e?.message !== "Payment cancelled") toast.error(e?.response?.data?.detail || "Checkout failed");
+      if (e?.message !== "Payment cancelled") {
+        const status = e?.response?.status;
+        const detail = e?.response?.data?.detail || e.message;
+        if (status === 409) {
+          toast.success(detail);
+          await refresh();
+          nav("/dashboard");
+        } else {
+          toast.error(detail || "Checkout failed");
+        }
+      }
     } finally { setBusy(false); }
   };
 
@@ -203,7 +218,7 @@ export default function Pricing() {
             className="w-full brut-sm brut-hover bg-card px-4 py-3 mt-6 font-mono text-xs uppercase tracking-widest font-bold disabled:opacity-40"
             disabled={!!user} onClick={() => nav("/signup")} data-testid="free-cta"
           >
-            {user ? "You're on Free" : "Get started free"}
+            {user?.plan === "lifetime" ? "You're on Lifetime 🎉" : (user ? "You're on Free" : "Get started free")}
           </button>
         </div>
 

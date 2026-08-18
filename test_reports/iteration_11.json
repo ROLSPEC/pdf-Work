@@ -1,0 +1,30 @@
+{
+  "summary": "Verified double-buy prevention (HTTP 409) on all 3 checkout endpoints + regression for fresh free users + idempotent mock-unlock + methods/availability endpoints + frontend Pricing UI for lifetime user. 11/11 backend tests pass. Frontend confirmed shows 'YOU'RE A LIFER' disabled button and PayPal-unavailable notice.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Pricing free-card CTA", "issue": "For a lifetime user the free-plan CTA button reads 'You're on Free' (mislabelled). It's disabled correctly but the copy should say 'You're on Lifetime' or similar. Pre-existing, unrelated to current change.", "selector": "[data-testid=\"free-cta\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_double_buy_prevention.py",
+    "/app/test_reports/pytest/double_buy_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Guards implemented correctly and in the right order: /billing/checkout, /billing/razorpay/order, /billing/paypal/order all check user.plan == 'lifetime' BEFORE any external gateway lookup or availability check — verified via test that PayPal returns 409 (not 503) for a lifetime user.",
+    "mock-unlock is now idempotent: {ok:true, already:true} for lifetime users with no DB write.",
+    "Frontend unlock() correctly: (a) early-returns for lifetime user with success toast + /dashboard redirect, (b) catches HTTP 409 in shared error handler and shows success toast + refresh + redirect.",
+    "Minor: free-card CTA label doesn't distinguish free vs lifetime users (shows 'You're on Free' for lifetime users too)."
+  ],
+  "updated_files": ["/app/backend/tests/test_double_buy_prevention.py"],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% for the reviewed feature"},
+  "test_credentials": "test1@ughpdf.com / testpass123 (existing lifetime); fresh users created via /api/auth/signup in-test.",
+  "seed_data_creation": "Created 4 disposable test users (life_*, free_*, rzpfree_*, ppfree_*, mock_*) via signup during tests. All isolated with unique uuid emails.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_double_buy_prevention.py provides regression coverage for the lifetime-409 guard across all 3 gateways. Existing test_ughpdf_backend.py still covers full app surface (56+ tests).",
+  "rca of the issue": "n/a — verification of feature hardening, no bugs found."
+}

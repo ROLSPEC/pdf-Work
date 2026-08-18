@@ -48,6 +48,8 @@ def build_router(db, get_current_user) -> APIRouter:
 
     @router.post("/billing/razorpay/order")
     async def create_order(body: OrderIn, user=Depends(get_current_user)):
+        if user.get("plan") == "lifetime":
+            raise HTTPException(409, "You're already on lifetime — no purchase needed 🎉")
         if not rzp_available():
             raise HTTPException(503, "Razorpay is not configured on this server")
         client = _client()
