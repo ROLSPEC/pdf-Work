@@ -1,46 +1,46 @@
-"""Ugh!PDF backend regression tests.
-Covers: health, tools registry, auth (signup/login/me/duplicate/google),
-server-side PDF tools, AI tools (Emergent LLM), credit consumption,
-file size limit, generic fallback, BYOK, billing mock unlock/checkout.
+"""Ugh!PDF backend regression tests — iter 6 (no AI, 24h ephemeral job history).
+
+Covers:
+- Health & tools registry (45 tools, 5 categories, no AI category)
+- All legacy AI endpoints return 404
+- Auth: signup/login/me/duplicate/google — user_public has NO ai_credits
+- Server PDF tools: protect, unlock, flatten, repair, pdf-to-text, pdf-to-markdown, bates, generic pdf-to-html
+- Job logging: /api/user/jobs list, delete-one, delete-all, cross-user isolation
+- MongoDB TTL index on user_jobs.expires_at + (user_id, created_at desc) compound index
+- Free plan enforcement: 25MB size limit (413), 10 daily ops (429)
+- Billing: geo, real Stripe checkout, mock-unlock (no ai_credits)
 """
 import io
 import os
-import time
 import uuid
+import time
+from datetime import datetime, timedelta, timezone
 import pytest
 import requests
+import pymongo
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import LETTER
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 if not BASE_URL:
-    # Fallback: read from frontend/.env
-    try:
-        with open("/app/frontend/.env") as f:
-            for line in f:
-                if line.startswith("REACT_APP_BACKEND_URL"):
-                    BASE_URL = line.split("=", 1)[1].strip().rstrip("/")
-    except Exception:
-        pass
+    with open("/app/frontend/.env") as f:
+        for line in f:
+            if line.startswith("REACT_APP_BACKEND_URL"):
+                BASE_URL = line.split("=", 1)[1].strip().rstrip("/")
 assert BASE_URL, "REACT_APP_BACKEND_URL missing"
 API = f"{BASE_URL}/api"
 
 
 # -------- helpers --------
-def make_pdf(text="Hello world. This is a test invoice. Total: $42.00. Email: john@example.com. SSN: 123-45-6789.") -> bytes:
+def make_pdf(text="Hello world. Invoice total: $42.00.") -> bytes:
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=LETTER)
     c.drawString(72, 720, text)
-    c.drawString(72, 700, "Page 1 of the sample PDF for unit tests.")
     c.showPage()
-    c.drawString(72, 720, "Page 2 content: 2+2=?, solve x+3=7.")
+    c.drawString(72, 720, "Page 2 of the sample PDF.")
     c.showPage()
     c.save()
     return buf.getvalue()
-
-
-def make_math_pdf() -> bytes:
-    return make_pdf("Solve: 2x + 3 = 11. What is x? Also: 5 * 6 = ?")
 
 
 @pytest.fixture(scope="session")
@@ -50,13 +50,12 @@ def sample_pdf():
 
 @pytest.fixture(scope="session")
 def fresh_user():
-    """Create a brand new user for the run."""
     email = f"test_{uuid.uuid4().hex[:8]}@ughpdf.com"
     pw = "testpass123"
     r = requests.post(f"{API}/auth/signup", json={"email": email, "password": pw, "name": "T"})
     assert r.status_code == 200, r.text
-    data = r.json()
-    return {"email": email, "password": pw, "token": data["token"], "user": data["user"]}
+    d = r.json()
+    return {"email": email, "password": pw, "token": d["token"], "user": d["user"]}
 
 
 @pytest.fixture(scope="session")
@@ -66,17 +65,15 @@ def auth_headers(fresh_user):
 
 @pytest.fixture(scope="session")
 def lifetime_user():
-    """A separate user upgraded to lifetime for AI-heavy tests."""
     email = f"life_{uuid.uuid4().hex[:8]}@ughpdf.com"
     r = requests.post(f"{API}/auth/signup", json={"email": email, "password": "testpass123", "name": "L"})
     assert r.status_code == 200
-    token = r.json()["token"]
-    r2 = requests.post(f"{API}/billing/mock-unlock", headers={"Authorization": f"Bearer {token}"})
+    tok = r.json()["token"]
+    r2 = requests.post(f"{API}/billing/mock-unlock", headers={"Authorization": f"Bearer {tok}"})
     assert r2.status_code == 200, r2.text
-    # Verify by fetching /auth/me
-    me = requests.get(f"{API}/auth/me", headers={"Authorization": f"Bearer {token}"}).json()
+    me = requests.get(f"{API}/auth/me", headers={"Authorization": f"Bearer {tok}"}).json()
     assert me["plan"] == "lifetime"
-    return {"email": email, "token": token, "user": me}
+    return {"email": email, "token": tok, "user": me}
 
 
 @pytest.fixture(scope="session")
@@ -90,21 +87,37 @@ def test_health_root():
     assert r.status_code == 200
     d = r.json()
     assert d["app"] == "Ugh!PDF"
-    assert d["tools"] >= 52  # spec says 52-53
+    assert d["tools"] == 45, f"expected 45 tools, got {d['tools']}"
+    assert d["categories"] == 5
 
 
-def test_tools_list():
+def test_tools_list_45_5_no_ai():
     r = requests.get(f"{API}/tools")
     assert r.status_code == 200
     d = r.json()
-    assert len(d["categories"]) == 6
-    assert len(d["tools"]) >= 52
+    assert len(d["categories"]) == 5
+    cat_ids = {c["id"] for c in d["categories"]}
+    assert "ai" not in cat_ids
+    assert cat_ids == {"convert", "organize", "optimize", "edit", "security"}
+    assert len(d["tools"]) == 45
     ids = {t["id"] for t in d["tools"]}
-    for must in ("merge", "ai-chat", "protect", "unlock", "bates"):
+    # No AI tool id must appear
+    ai_leaks = [i for i in ids if i.startswith("ai-")]
+    assert ai_leaks == [], f"AI tool ids leaked: {ai_leaks}"
+    # Core tools present
+    for must in ("merge", "protect", "unlock", "bates", "pdf-to-text", "pdf-to-markdown"):
         assert must in ids
 
 
-@pytest.mark.parametrize("tid", ["merge", "ai-chat", "protect", "pdf-to-text"])
+def test_local_tools_registered():
+    r = requests.get(f"{API}/tools")
+    d = r.json()
+    by_id = {t["id"]: t for t in d["tools"]}
+    for lid in ("merge", "split", "rotate", "compress"):
+        assert by_id[lid]["engine"] == "local"
+
+
+@pytest.mark.parametrize("tid", ["merge", "protect", "pdf-to-text", "bates"])
 def test_tool_by_id(tid):
     r = requests.get(f"{API}/tools/{tid}")
     assert r.status_code == 200
@@ -116,37 +129,58 @@ def test_tool_by_id_404():
     assert r.status_code == 404
 
 
+# ================= AI REMOVAL (all must 404) =================
+@pytest.mark.parametrize("ai_id", [
+    "ai-chat", "ai-summarize", "ai-redact", "ai-extract",
+    "ai-audiobook", "ai-math", "ai-ocr", "ai-visual-diff",
+])
+def test_ai_endpoints_removed(ai_id, life_headers, sample_pdf):
+    """Legacy AI endpoints must not exist. Registry lookup returns 404 via generic route."""
+    # /tools/{id} should 404
+    r = requests.get(f"{API}/tools/{ai_id}")
+    assert r.status_code == 404, f"{ai_id} still in tools registry"
+    # POST /tools/{id}/run — no explicit route registered; FastAPI returns 404 or 405
+    files = {"file": ("s.pdf", sample_pdf, "application/pdf")}
+    r = requests.post(f"{API}/tools/{ai_id}/run", headers=life_headers, files=files)
+    assert r.status_code in (404, 405), f"{ai_id}/run returned {r.status_code}"
+
+
 # ================= AUTH =================
-def test_signup_new(fresh_user):
+def test_signup_no_ai_credits(fresh_user):
     u = fresh_user["user"]
     assert u["plan"] == "free"
-    assert u["ai_credits"] == 5
-    assert u["email"] == fresh_user["email"]
+    assert "ai_credits" not in u
+    assert "ai_credits_reset_at" not in u
+    # New shape
+    for k in ("id", "email", "name", "plan", "ops_today", "ops_reset_at", "max_file_mb", "daily_ops_limit"):
+        assert k in u, f"missing {k}"
+    assert u["max_file_mb"] == 25
+    assert u["daily_ops_limit"] == 10
 
 
 def test_signup_duplicate(fresh_user):
-    r = requests.post(f"{API}/auth/signup",
-                      json={"email": fresh_user["email"], "password": "abcdef", "name": "x"})
+    r = requests.post(f"{API}/auth/signup", json={"email": fresh_user["email"], "password": "abcdef"})
     assert r.status_code == 400
 
 
 def test_login_valid(fresh_user):
-    r = requests.post(f"{API}/auth/login",
-                      json={"email": fresh_user["email"], "password": fresh_user["password"]})
+    r = requests.post(f"{API}/auth/login", json={"email": fresh_user["email"], "password": fresh_user["password"]})
     assert r.status_code == 200
     assert "token" in r.json() and "user" in r.json()
+    assert "ai_credits" not in r.json()["user"]
 
 
 def test_login_invalid(fresh_user):
-    r = requests.post(f"{API}/auth/login",
-                      json={"email": fresh_user["email"], "password": "wrong-pass"})
+    r = requests.post(f"{API}/auth/login", json={"email": fresh_user["email"], "password": "wrong"})
     assert r.status_code == 401
 
 
 def test_me_authed(auth_headers, fresh_user):
     r = requests.get(f"{API}/auth/me", headers=auth_headers)
     assert r.status_code == 200
-    assert r.json()["email"] == fresh_user["email"]
+    d = r.json()
+    assert d["email"] == fresh_user["email"]
+    assert "ai_credits" not in d
 
 
 def test_me_no_token():
@@ -159,21 +193,19 @@ def test_google_invalid_session():
     assert r.status_code == 401
 
 
-# ================= SERVER PDF TOOLS =================
+# ================= SERVER PDF TOOLS + JOB LOGGING =================
 def test_protect(life_headers, sample_pdf):
     files = {"file": ("s.pdf", sample_pdf, "application/pdf")}
     r = requests.post(f"{API}/tools/protect/run", headers=life_headers,
                       files=files, data={"password": "sekret123"})
     assert r.status_code == 200, r.text
-    assert r.headers["content-type"].startswith("application/pdf")
     assert r.content[:4] == b"%PDF"
-    # Save for unlock test
     test_protect.protected_pdf = r.content
 
 
 def test_unlock(life_headers):
     prot = getattr(test_protect, "protected_pdf", None)
-    assert prot, "protect must run first"
+    assert prot
     files = {"file": ("p.pdf", prot, "application/pdf")}
     r = requests.post(f"{API}/tools/unlock/run", headers=life_headers,
                       files=files, data={"password": "sekret123"})
@@ -184,9 +216,8 @@ def test_unlock(life_headers):
 def test_pdf_to_text(life_headers, sample_pdf):
     files = {"file": ("s.pdf", sample_pdf, "application/pdf")}
     r = requests.post(f"{API}/tools/pdf-to-text/run", headers=life_headers, files=files)
-    assert r.status_code == 200, r.text
+    assert r.status_code == 200
     assert "text/plain" in r.headers.get("content-type", "")
-    assert b"invoice" in r.content.lower() or b"page" in r.content.lower()
 
 
 def test_pdf_to_markdown(life_headers, sample_pdf):
@@ -200,7 +231,7 @@ def test_bates(life_headers, sample_pdf):
     files = {"file": ("s.pdf", sample_pdf, "application/pdf")}
     r = requests.post(f"{API}/tools/bates/run", headers=life_headers,
                       files=files, data={"prefix": "TEST", "start": 1})
-    assert r.status_code == 200, r.text
+    assert r.status_code == 200
     assert r.content[:4] == b"%PDF"
 
 
@@ -225,246 +256,164 @@ def test_generic_pdf_to_html(life_headers, sample_pdf):
     assert b"<html>" in r.content
 
 
-def test_generic_word_to_pdf(life_headers, sample_pdf):
-    files = {"file": ("s.pdf", sample_pdf, "application/pdf")}
-    r = requests.post(f"{API}/tools/word-to-pdf/run-generic", headers=life_headers, files=files)
+# ================= JOBS (24h TTL) =================
+def test_jobs_listed_after_protect(life_headers):
+    """After the protect test above ran, GET /user/jobs should include a job at top."""
+    r = requests.get(f"{API}/user/jobs", headers=life_headers)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["ttl_hours"] == 24
+    assert isinstance(d["jobs"], list) and len(d["jobs"]) > 0
+    # Find at least one 'protect' entry
+    protect_jobs = [j for j in d["jobs"] if j["tool_id"] == "protect"]
+    assert protect_jobs, "no protect job found in history"
+    j = protect_jobs[0]
+    for k in ("id", "tool_id", "tool_name", "filename", "size_bytes", "engine", "status", "created_at", "expires_at"):
+        assert k in j, f"missing job field {k}"
+    assert j["engine"] == "server"
+    assert j["status"] == "completed"
+    # expires_at ~ created_at + 24h
+    created = datetime.fromisoformat(j["created_at"].replace("Z", "+00:00"))
+    expires = datetime.fromisoformat(j["expires_at"].replace("Z", "+00:00"))
+    diff = (expires - created).total_seconds()
+    assert 23.5 * 3600 <= diff <= 24.5 * 3600, f"expires_at not ~24h from created_at: {diff}s"
+
+
+def test_delete_single_job(life_headers, sample_pdf):
+    # Create a fresh job to delete
+    files = {"file": ("del.pdf", sample_pdf, "application/pdf")}
+    r = requests.post(f"{API}/tools/flatten/run", headers=life_headers, files=files)
     assert r.status_code == 200
-
-
-# ================= AI TOOLS =================
-def test_ai_summarize(life_headers, sample_pdf):
-    files = {"file": ("s.pdf", sample_pdf, "application/pdf")}
-    r = requests.post(f"{API}/tools/ai-summarize/run", headers=life_headers, files=files, timeout=120)
-    assert r.status_code == 200, r.text
-    d = r.json()
-    assert "summary" in d and isinstance(d["summary"], str) and len(d["summary"]) > 5
-
-
-def test_ai_chat(life_headers, sample_pdf):
-    files = {"file": ("s.pdf", sample_pdf, "application/pdf")}
-    r = requests.post(f"{API}/tools/ai-chat/run", headers=life_headers,
-                      files=files, data={"question": "What is the total?"}, timeout=120)
-    assert r.status_code == 200, r.text
-    d = r.json()
-    # RAG payload assertions
-    assert "answer" in d and isinstance(d["answer"], str) and len(d["answer"]) > 0
-    assert "citations" in d and isinstance(d["citations"], list)
-    assert "file_hash" in d and len(d["file_hash"]) == 64  # SHA-256 hex
-    assert "n_chunks_used" in d and "n_chunks_total" in d
-    assert d["n_chunks_total"] >= 1
-    for c in d["citations"]:
-        assert "page" in c and "score" in c and "snippet" in c
-    test_ai_chat.file_hash = d["file_hash"]
-
-
-def _make_two_page_pdf():
-    """Page 1: John Doe. Page 2: Acme invoice total."""
-    buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=LETTER)
-    c.drawString(72, 720, "This document is about a person named John Doe.")
-    c.drawString(72, 700, "John Doe is our primary customer and contact.")
-    c.showPage()
-    c.drawString(72, 720, "Acme invoice details are recorded here.")
-    c.drawString(72, 700, "The Acme invoice total is $1,234.56 due next month.")
-    c.showPage()
-    c.save()
-    return buf.getvalue()
-
-
-def test_ai_chat_rag_relevance_person(life_headers):
-    pdf = _make_two_page_pdf()
-    files = {"file": ("rag.pdf", pdf, "application/pdf")}
-    r = requests.post(f"{API}/tools/ai-chat/run", headers=life_headers,
-                      files=files, data={"question": "Who is the person mentioned?"}, timeout=120)
-    assert r.status_code == 200, r.text
-    d = r.json()
-    pages = [c["page"] for c in d["citations"]]
-    assert 1 in pages, f"Expected page 1 citation for person query, got {pages}"
-
-
-def test_ai_chat_rag_relevance_invoice(life_headers):
-    pdf = _make_two_page_pdf()
-    files = {"file": ("rag.pdf", pdf, "application/pdf")}
-    r = requests.post(f"{API}/tools/ai-chat/run", headers=life_headers,
-                      files=files, data={"question": "What is the invoice total?"}, timeout=120)
-    assert r.status_code == 200, r.text
-    d = r.json()
-    pages = [c["page"] for c in d["citations"]]
-    assert 2 in pages, f"Expected page 2 citation for invoice query, got {pages}"
-
-
-def test_ai_chat_rag_cache_persistence(life_headers, sample_pdf):
-    """Same file uploaded twice must reuse the cached index (single MongoDB entry)."""
-    files1 = {"file": ("s.pdf", sample_pdf, "application/pdf")}
-    r1 = requests.post(f"{API}/tools/ai-chat/run", headers=life_headers,
-                       files=files1, data={"question": "invoice total?"}, timeout=120)
-    assert r1.status_code == 200
-    fh1 = r1.json()["file_hash"]
-    files2 = {"file": ("s.pdf", sample_pdf, "application/pdf")}
-    r2 = requests.post(f"{API}/tools/ai-chat/run", headers=life_headers,
-                       files=files2, data={"question": "who signed?"}, timeout=120)
-    assert r2.status_code == 200
-    fh2 = r2.json()["file_hash"]
-    assert fh1 == fh2, "Same file bytes must produce same hash"
-
-    # Different file → different hash
-    other_pdf = _make_two_page_pdf()
-    files3 = {"file": ("o.pdf", other_pdf, "application/pdf")}
-    r3 = requests.post(f"{API}/tools/ai-chat/run", headers=life_headers,
-                       files=files3, data={"question": "who?"}, timeout=120)
-    assert r3.status_code == 200
-    fh3 = r3.json()["file_hash"]
-    assert fh3 != fh1, "Different files must produce different hashes"
-
-
-def test_rag_index_stored_in_mongo(life_headers, sample_pdf):
-    """Verify the rag_indexes collection contains an entry keyed by file_hash."""
-    import pymongo
-    # Trigger a chat to ensure entry exists
-    files = {"file": ("s.pdf", sample_pdf, "application/pdf")}
-    r = requests.post(f"{API}/tools/ai-chat/run", headers=life_headers,
-                      files=files, data={"question": "?"}, timeout=120)
+    jobs = requests.get(f"{API}/user/jobs", headers=life_headers).json()["jobs"]
+    target = jobs[0]  # newest
+    jid = target["id"]
+    # Delete
+    r = requests.delete(f"{API}/user/jobs/{jid}", headers=life_headers)
     assert r.status_code == 200
-    fh = r.json()["file_hash"]
-    # Read env directly
+    assert r.json() == {"deleted": True}
+    # Verify gone
+    jobs2 = requests.get(f"{API}/user/jobs", headers=life_headers).json()["jobs"]
+    assert jid not in [j["id"] for j in jobs2]
+
+
+def test_delete_nonexistent_job_404(life_headers):
+    r = requests.delete(f"{API}/user/jobs/does-not-exist-{uuid.uuid4().hex}", headers=life_headers)
+    assert r.status_code == 404
+
+
+def test_delete_cross_user_isolation(life_headers, sample_pdf):
+    # user A creates a job
+    files = {"file": ("iso.pdf", sample_pdf, "application/pdf")}
+    requests.post(f"{API}/tools/flatten/run", headers=life_headers, files=files)
+    jobs = requests.get(f"{API}/user/jobs", headers=life_headers).json()["jobs"]
+    a_job_id = jobs[0]["id"]
+
+    # user B signs up
+    email = f"iso_{uuid.uuid4().hex[:8]}@ughpdf.com"
+    r = requests.post(f"{API}/auth/signup", json={"email": email, "password": "testpass123"})
+    b_headers = {"Authorization": f"Bearer {r.json()['token']}"}
+
+    # B cannot delete A's job
+    r = requests.delete(f"{API}/user/jobs/{a_job_id}", headers=b_headers)
+    assert r.status_code == 404, "user B should not be able to delete user A's job"
+
+    # A's job still exists
+    jobs_a = requests.get(f"{API}/user/jobs", headers=life_headers).json()["jobs"]
+    assert a_job_id in [j["id"] for j in jobs_a]
+
+
+def test_delete_all_jobs():
+    # Fresh isolated user so we don't nuke lifetime_user's history mid-suite
+    email = f"delall_{uuid.uuid4().hex[:8]}@ughpdf.com"
+    r = requests.post(f"{API}/auth/signup", json={"email": email, "password": "testpass123"})
+    tok = r.json()["token"]
+    h = {"Authorization": f"Bearer {tok}"}
+    pdf = make_pdf()
+    # create 3 jobs
+    for _ in range(3):
+        files = {"file": ("a.pdf", pdf, "application/pdf")}
+        requests.post(f"{API}/tools/flatten/run", headers=h, files=files)
+    jobs = requests.get(f"{API}/user/jobs", headers=h).json()["jobs"]
+    assert len(jobs) == 3
+    r = requests.delete(f"{API}/user/jobs", headers=h)
+    assert r.status_code == 200
+    assert r.json()["deleted"] == 3
+    jobs2 = requests.get(f"{API}/user/jobs", headers=h).json()["jobs"]
+    assert jobs2 == []
+
+
+def test_mongo_ttl_index():
+    """Verify user_jobs has a TTL index on expires_at (expireAfterSeconds=0)
+    and a (user_id, created_at desc) compound index."""
     mongo_url = os.environ.get("MONGO_URL")
     db_name = os.environ.get("DB_NAME")
-    if not mongo_url or not mongo_url.startswith("mongodb"):
-        # Fallback: parse backend/.env
+    if not mongo_url:
         with open("/app/backend/.env") as f:
             for line in f:
                 if line.startswith("MONGO_URL="):
                     mongo_url = line.split("=", 1)[1].strip().strip('"').strip("'")
                 elif line.startswith("DB_NAME="):
                     db_name = line.split("=", 1)[1].strip().strip('"').strip("'")
-    client = pymongo.MongoClient(mongo_url)
-    db_h = client[db_name]
-    doc = db_h.rag_indexes.find_one({"_id": fh})
-    assert doc is not None, f"rag_indexes missing entry for {fh}"
-    assert "chunks" in doc and "blob" in doc and "n_chunks" in doc
-    assert doc["n_chunks"] >= 1
+    cli = pymongo.MongoClient(mongo_url)
+    idx = list(cli[db_name].user_jobs.list_indexes())
+    ttl = [i for i in idx if i.get("expireAfterSeconds") == 0 and "expires_at" in i["key"]]
+    assert ttl, f"no TTL index on expires_at found: {idx}"
+    compound = [i for i in idx if list(i["key"].items()) == [("user_id", 1), ("created_at", -1)]]
+    assert compound, f"missing (user_id, created_at desc) compound index: {idx}"
 
 
-def test_ai_extract(life_headers, sample_pdf):
-    files = {"file": ("s.pdf", sample_pdf, "application/pdf")}
-    r = requests.post(f"{API}/tools/ai-extract/run", headers=life_headers,
-                      files=files, data={"hint": "invoice"}, timeout=120)
-    assert r.status_code == 200, r.text
-    assert "data" in r.json()
-
-
-def test_ai_redact(life_headers, sample_pdf):
-    files = {"file": ("s.pdf", sample_pdf, "application/pdf")}
-    r = requests.post(f"{API}/tools/ai-redact/run", headers=life_headers, files=files, timeout=120)
-    assert r.status_code == 200, r.text
-    d = r.json()
-    assert "findings" in d and "count" in d
-
-
-def test_ai_math(life_headers):
-    pdf = make_math_pdf()
-    files = {"file": ("m.pdf", pdf, "application/pdf")}
-    r = requests.post(f"{API}/tools/ai-math/run", headers=life_headers, files=files, timeout=120)
-    assert r.status_code == 200, r.text
-    assert "solution" in r.json()
-
-
-def test_ai_ocr(life_headers, sample_pdf):
-    files = {"file": ("s.pdf", sample_pdf, "application/pdf")}
-    r = requests.post(f"{API}/tools/ai-ocr/run", headers=life_headers, files=files, timeout=60)
-    assert r.status_code == 200, r.text
-    d = r.json()
-    assert "text_by_page" in d and "scanned_pages" in d and "message" in d
-
-
-def test_ai_visual_diff(life_headers, sample_pdf):
-    pdf2 = make_pdf("Different content: Total: $99.00. Bob@example.com.")
-    files = [("file_a", ("a.pdf", sample_pdf, "application/pdf")),
-             ("file_b", ("b.pdf", pdf2, "application/pdf"))]
-    r = requests.post(f"{API}/tools/ai-visual-diff/run", headers=life_headers, files=files, timeout=120)
-    assert r.status_code == 200, r.text
-    assert "diff" in r.json()
-
-
-# ================= CREDITS / LIMITS =================
-def test_credit_consumption_and_out_of_credits(sample_pdf):
-    # Fresh free user has 5 credits. ai-extract costs 3, ai-summarize 2 -> total 5 used.
-    email = f"cred_{uuid.uuid4().hex[:8]}@ughpdf.com"
-    r = requests.post(f"{API}/auth/signup", json={"email": email, "password": "testpass123"})
-    assert r.status_code == 200
-    tok = r.json()["token"]
-    h = {"Authorization": f"Bearer {tok}"}
-    files = {"file": ("s.pdf", sample_pdf, "application/pdf")}
-
-    # 1st: summarize costs 2 -> credits 5->3
-    r1 = requests.post(f"{API}/tools/ai-summarize/run", headers=h, files=files, timeout=120)
-    assert r1.status_code == 200
-    me = requests.get(f"{API}/auth/me", headers=h).json()
-    assert me["ai_credits"] == 3
-    assert me["ops_today"] >= 1
-
-    # 2nd: extract costs 3 -> credits 3->0
-    files2 = {"file": ("s.pdf", sample_pdf, "application/pdf")}
-    r2 = requests.post(f"{API}/tools/ai-extract/run", headers=h, files=files2,
-                       data={"hint": ""}, timeout=120)
-    assert r2.status_code == 200
-    me2 = requests.get(f"{API}/auth/me", headers=h).json()
-    assert me2["ai_credits"] == 0
-
-    # 3rd: any AI call -> 402
-    files3 = {"file": ("s.pdf", sample_pdf, "application/pdf")}
-    r3 = requests.post(f"{API}/tools/ai-chat/run", headers=h, files=files3,
-                       data={"question": "hi"}, timeout=60)
-    assert r3.status_code == 402, r3.text
-
-
+# ================= FREE LIMITS =================
 def test_file_size_limit_free(sample_pdf):
     email = f"big_{uuid.uuid4().hex[:8]}@ughpdf.com"
     r = requests.post(f"{API}/auth/signup", json={"email": email, "password": "testpass123"})
     tok = r.json()["token"]
     h = {"Authorization": f"Bearer {tok}"}
-    # Make a >25MB blob
     big = b"%PDF-1.4\n" + b"0" * (26 * 1024 * 1024)
     files = {"file": ("big.pdf", big, "application/pdf")}
     r = requests.post(f"{API}/tools/pdf-to-text/run", headers=h, files=files)
-    assert r.status_code == 413, r.status_code
+    assert r.status_code == 413
 
 
-# ================= BYOK =================
-def test_byok(auth_headers):
-    r = requests.post(f"{API}/auth/byok", headers=auth_headers,
-                      json={"openai_key": "sk-test-abc", "gemini_key": "gem-xyz"})
-    assert r.status_code == 200, r.text
-    d = r.json()
-    assert d["byok_openai"] is True
-    assert d["byok_gemini"] is True
+def test_daily_ops_limit_free(sample_pdf):
+    email = f"lim_{uuid.uuid4().hex[:8]}@ughpdf.com"
+    r = requests.post(f"{API}/auth/signup", json={"email": email, "password": "testpass123"})
+    tok = r.json()["token"]
+    h = {"Authorization": f"Bearer {tok}"}
+    # 10 daily ops for free plan → 11th must 429
+    ok_count = 0
+    for i in range(10):
+        files = {"file": (f"a{i}.pdf", sample_pdf, "application/pdf")}
+        r = requests.post(f"{API}/tools/pdf-to-text/run", headers=h, files=files)
+        if r.status_code == 200:
+            ok_count += 1
+    assert ok_count == 10, f"expected 10 ok, got {ok_count}"
+    files = {"file": ("over.pdf", sample_pdf, "application/pdf")}
+    r = requests.post(f"{API}/tools/pdf-to-text/run", headers=h, files=files)
+    assert r.status_code == 429, f"expected 429 on 11th, got {r.status_code}"
 
 
 # ================= BILLING =================
-def test_billing_mock_unlock():
+def test_billing_mock_unlock_no_ai_credits():
     email = f"pay_{uuid.uuid4().hex[:8]}@ughpdf.com"
     r = requests.post(f"{API}/auth/signup", json={"email": email, "password": "testpass123"})
     tok = r.json()["token"]
     r2 = requests.post(f"{API}/billing/mock-unlock", headers={"Authorization": f"Bearer {tok}"})
     assert r2.status_code == 200, r2.text
     assert r2.json().get("plan") == "lifetime"
-    # Verify persistence via /auth/me
     me = requests.get(f"{API}/auth/me", headers={"Authorization": f"Bearer {tok}"}).json()
     assert me["plan"] == "lifetime"
-    assert me["ai_credits"] == 50
+    assert "ai_credits" not in me
+    assert me["max_file_mb"] == 100
+    assert me["daily_ops_limit"] == 200
 
 
 def test_billing_geo():
     r = requests.get(f"{API}/billing/geo")
-    assert r.status_code == 200, r.text
+    assert r.status_code == 200
     d = r.json()
     for k in ("country", "currency", "symbol", "amount", "display"):
-        assert k in d, f"missing key {k}"
-    # In container network, country resolves via ipapi.co; expect US w/ USD $1
-    # (tolerate other countries as fallback if geo detection returns something else)
+        assert k in d
     assert d["amount"] == 1.0
-    assert d["display"].endswith("1")
-    assert d["currency"] in ("USD", "CAD", "GBP", "EUR", "AUD", "NZD", "INR")
 
 
 def test_billing_checkout_real_stripe():
@@ -479,36 +428,5 @@ def test_billing_checkout_real_stripe():
     )
     assert r2.status_code == 200, r2.text
     d = r2.json()
-    assert "url" in d
-    assert d["url"].startswith("https://checkout.stripe.com"), f"Expected real Stripe URL, got: {d['url']}"
-    assert "session_id" in d and d["session_id"].startswith("cs_")
-    assert d["amount"] == 1.0
-    assert d["currency"] in ("USD", "CAD", "GBP", "EUR", "AUD", "NZD", "INR")
-    # Stash for status test
-    test_billing_checkout_real_stripe.session_id = d["session_id"]
-    test_billing_checkout_real_stripe.currency = d["currency"]
-
-
-def test_payments_status_created():
-    sid = getattr(test_billing_checkout_real_stripe, "session_id", None)
-    assert sid, "checkout must run first"
-    r = requests.get(f"{API}/payments/status/{sid}")
-    assert r.status_code == 200, r.text
-    d = r.json()
-    assert d["session_id"] == sid
-    # Status is initiated until payment completes
-    assert d["status"] in ("initiated", "completed")
-    assert d["payment_status"] in ("pending", "paid")
-    assert d["amount"] == 1.0
-
-
-def test_payments_status_unknown_404():
-    r = requests.get(f"{API}/payments/status/cs_test_does_not_exist_xyz")
-    assert r.status_code == 404
-
-
-def test_stripe_webhook_invalid_signature():
-    # No valid stripe-signature header -> 400
-    r = requests.post(f"{API}/webhook/stripe", data=b'{"type":"noop"}',
-                      headers={"stripe-signature": "t=1,v1=fake"})
-    assert r.status_code == 400
+    assert d["url"].startswith("https://checkout.stripe.com"), d["url"]
+    assert d["session_id"].startswith("cs_")

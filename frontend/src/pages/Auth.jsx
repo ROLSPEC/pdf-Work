@@ -40,7 +40,7 @@ export default function Auth({ mode = "login" }) {
           {isSignup ? "Sign up." : "Log in."}
         </h1>
         <p className="text-sm mt-2 font-medium">
-          {isSignup ? "Free tier: 25MB, 10 files/day, 5 AI credits." : "Log in to use cloud & AI tools."}
+          {isSignup ? "Free tier: 25MB, 10 files/day." : "Log in to use cloud tools & see your recent files."}
         </p>
 
         <button

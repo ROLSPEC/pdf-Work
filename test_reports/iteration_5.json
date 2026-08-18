@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 5 verified the RAG upgrade from TF-IDF to semantic embeddings (fastembed BAAI/bge-small-en-v1.5, 384-dim). All 46 backend tests pass (43 iter-4 regressions + 3 new semantic paraphrase tests). Existing rag-index test was updated for the new MongoDB schema (vectors[], version=2, model, dim=384). Frontend /t/ai-chat renders answer + citations with page badges and cosine scores; the paraphrase query 'Who leads the company?' correctly returned p.1 (CEO Sarah Kim) as the top citation with score 0.658. Backend warm-up log 'RAG embedder warmed up' confirmed at startup so first query is fast.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/billing/checkout", "issue": "(still open from iter 2-4) webhook_url derived from request.base_url resolves to internal K8s URL; use PUBLIC_BASE_URL env instead."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ughpdf_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "rag.py: clean fastembed integration — lazy singleton embedder, async-safe via asyncio.to_thread, cosine sim via numpy, MongoDB cache keyed on SHA-256 with version+model+dim markers; upsert is idempotent. Nothing to flag.",
+    "server.py: startup hook warms the embedder in a thread — verified via 'INFO:ughpdf:RAG embedder warmed up' in supervisor log after the last reload.",
+    "Semantic retrieval empirically works for all three paraphrased queries in the request: 'Who leads the company?' -> p.1 (0.658); 'What are the earnings and margins?' -> p.3 (top); 'What is upcoming on the roadmap?' -> p.2 (top). None share vocabulary with the source page.",
+    "Cache correctness verified: same PDF bytes -> same SHA-256 -> single doc in rag_indexes with schema {version:2, model:'BAAI/bge-small-en-v1.5', chunks:[...], vectors:[[384 floats]...], dim:384, n_chunks, created_at}. Different PDFs -> different hashes.",
+    "Response payload shape validated: answer(str), citations[{page:int, score:float in [0,1], snippet:str}], file_hash(64-hex), n_chunks_total, n_chunks_used, embedding_model contains 'bge-small-en-v1.5'.",
+    "No _id leaked in any API response; MongoDB access uses async motor pattern."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ughpdf_backend.py (updated test_ai_chat for new payload fields + score range; rewrote test_rag_index_stored_in_mongo for the new vectors/version/model schema; added 3 semantic paraphrase tests)"
+  ],
+  "success_rate": {"backend": "100% (46/46)", "frontend": "100% (ai-chat flow renders answer + cited pages + scores, no console errors)"},
+  "test_credentials": "test1@ughpdf.com / testpass123 (existing). Ephemeral users created per test run via /api/auth/signup then /api/billing/mock-unlock (lifetime, 50 credits).",
+  "seed_data_creation": "rag_indexes gains a few embedding docs from the semantic paraphrase test PDFs (~10 KB each, harmless).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "RAG is now semantic (fastembed BAAI/bge-small-en-v1.5, 384-dim ONNX). Model auto-downloads to /tmp/fastembed_cache on first run; startup warm-up hook loads it in a thread and logs 'RAG embedder warmed up'. MongoDB cache: db.rag_indexes[_id=sha256] = {version:2, model, chunks, vectors[[384 floats]], dim:384, n_chunks, created_at}. Old TF-IDF (base64 blob) entries have been cleared. Retrieval filters cosine>0.25 with top-1 fallback. Backend regression file: /app/backend/tests/test_ughpdf_backend.py — 46 tests, ~50s runtime with -n 2 workers.",
+  "rca of the issue": "N/A — no bug in this iteration. The infra swap (sklearn TF-IDF -> fastembed) works end-to-end; the previously-open issue from iter 4 ('RAG index blob is pickled TfidfVectorizer stored as base64 in Mongo — fragile across sklearn versions') is now resolved by JSON-serialized float vectors + explicit version marker."
+}

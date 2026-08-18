@@ -72,7 +72,7 @@ class CheckoutIn(BaseModel):
     origin_url: str
 
 
-def build_router(db, get_current_user, PAID_CREDITS: int) -> APIRouter:
+def build_router(db, get_current_user) -> APIRouter:
     router = APIRouter()
 
     STRIPE_KEY = os.environ.get("STRIPE_API_KEY") or os.environ.get("STRIPE_SECRET_KEY") or ""
@@ -99,7 +99,7 @@ def build_router(db, get_current_user, PAID_CREDITS: int) -> APIRouter:
     async def checkout(body: CheckoutIn, request: Request, user=Depends(get_current_user)):
         if not STRIPE_KEY:
             # Dev-mode fallback: mock unlock
-            await db.users.update_one({"_id": user["_id"]}, {"$set": {"plan": "lifetime", "ai_credits": PAID_CREDITS}})
+            await db.users.update_one({"_id": user["_id"]}, {"$set": {"plan": "lifetime"}})
             return {"url": f"{body.origin_url}/unlocked?mock=1", "mock": True}
         country = await _geo_country(request)
         currency, symbol = resolve_currency(country)
@@ -144,7 +144,7 @@ def build_router(db, get_current_user, PAID_CREDITS: int) -> APIRouter:
                 checkout_lib = _get_checkout(host_url)
                 status = await checkout_lib.get_checkout_status(session_id)
                 if status.payment_status == "paid":
-                    await _grant_lifetime(db, rec["user_id"], session_id, status.payment_status, PAID_CREDITS)
+                    await _grant_lifetime(db, rec["user_id"], session_id, status.payment_status, 0)
                     rec = await db.payment_transactions.find_one({"session_id": session_id})
             except Exception:
                 pass
@@ -171,13 +171,13 @@ def build_router(db, get_current_user, PAID_CREDITS: int) -> APIRouter:
         if wr.payment_status == "paid":
             uid = (wr.metadata or {}).get("user_id")
             if uid:
-                await _grant_lifetime(db, uid, wr.session_id, "paid", PAID_CREDITS)
+                await _grant_lifetime(db, uid, wr.session_id, "paid", 0)
         return {"status": "ok"}
 
     @router.post("/billing/mock-unlock")
     async def mock_unlock(user=Depends(get_current_user)):
         """Dev helper: instantly unlock lifetime."""
-        await db.users.update_one({"_id": user["_id"]}, {"$set": {"plan": "lifetime", "ai_credits": PAID_CREDITS}})
+        await db.users.update_one({"_id": user["_id"]}, {"$set": {"plan": "lifetime"}})
         return {"ok": True, "plan": "lifetime"}
 
     return router
@@ -199,4 +199,4 @@ async def _grant_lifetime(db, user_id: str, session_id: str, payment_status: str
         {"$set": {"status": "completed", "payment_status": "paid",
                   "updated_at": datetime.now(timezone.utc).isoformat()}},
     )
-    await db.users.update_one({"_id": user_id}, {"$set": {"plan": "lifetime", "ai_credits": credits}})
+    await db.users.update_one({"_id": user_id}, {"$set": {"plan": "lifetime"}})

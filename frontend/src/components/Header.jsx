@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
-import { Sun, Moon, SignOut, Sparkle, UserCircle } from "@phosphor-icons/react";
+import { Sun, Moon, SignOut, UserCircle } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 
 export default function Header() {
@@ -75,7 +75,7 @@ export default function Header() {
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => nav("/dashboard")} data-testid="menu-dashboard" className="font-mono text-xs uppercase tracking-wider">
-                  <Sparkle size={14} className="mr-2 text-accent" weight="fill" /> {user.ai_credits} credits
+                  Dashboard · {user.ops_today} ops today
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => nav("/pricing")} data-testid="menu-pricing" className="font-mono text-xs uppercase tracking-wider">
                   Billing

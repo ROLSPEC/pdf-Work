@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 6 verified the AI cleanup + 24h ephemeral job history. Rewrote /app/backend/tests/test_ughpdf_backend.py (pruned all AI RAG tests, added user_jobs + TTL index + AI-404 tests). 42/42 backend tests pass. Frontend verified: landing hero-chip='45 TOOLS · $1 LIFETIME', 45 tools in the grid, zero AI tiles, 5 primary categories (+ 'all' filter tile). Dashboard shows Plan/Ops/FileTTL cards + 'Recent files' list with per-row Delete and Delete-all — both end-to-end verified. One HIGH-priority frontend bug found & FIXED: Dashboard was redirecting to /login even for logged-in users because it evaluated `user===null` before AuthProvider finished its /auth/me hydration (initial state = null). Fix: also gate on `authLoading` from useAuth. One minor copy issue left over.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/billing/checkout", "issue": "(carry-over from iter 2-5) webhook_url derived from request.base_url resolves to an internal K8s URL; consider PUBLIC_BASE_URL env instead. Not blocking checkout URL generation."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "pages/Auth.jsx (Login page)", "issue": "Sub-heading still says 'Log in to use cloud & AI tools.' — stale copy referencing AI after the cleanup.", "selector": "text=/cloud & AI tools/", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ughpdf_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Update /app/frontend/src/pages/Auth.jsx login sub-heading to remove 'AI tools' wording (e.g., 'Log in to use cloud tools.' or 'Log in to save your history.')."
+  ],
+  "critical_code_review_comments": [
+    "server.py::_log_job — engine label is pulled from TOOL_MAP, which correctly reports 'server' for protect/unlock/flatten etc. Good.",
+    "server.py::delete_job uses {'_id': job_id, 'user_id': user['_id']} — cross-user isolation verified (test_delete_cross_user_isolation passes).",
+    "startup hook creates BOTH indexes (TTL on expires_at + compound on user_id+created_at desc) — verified via list_indexes in test_mongo_ttl_index.",
+    "server.py drops legacy rag_indexes collection on every startup — one-time-cleanup style. Consider only running once (idempotent but wasteful on every restart).",
+    "tools_registry.py: 45 tools + 5 categories, no AI. Match with frontend registry.",
+    "user_public() correctly omits ai_credits/ai_credits_reset_at. Signup/login/me responses verified free of ai_credits.",
+    "Dashboard.jsx had a race condition: initial user state (null) triggered nav('/login') before AuthProvider finished /auth/me. FIXED by also checking authLoading (see updated_files).",
+    "generic_stub for pdf-to-html works, but generic_stub silently echoes the input for any unknown tool — could mislead users. Consider returning 501 or an explicit 'not yet implemented' JSON payload for local-only tools that shouldn't hit /run-generic.",
+    "No _id leaked in API responses (verified via jobs list and me endpoints)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ughpdf_backend.py (fully rewritten — 42 tests: AI removal 404 checks, user_jobs CRUD + isolation, TTL index, free-plan 25MB/10ops limits, billing, no ai_credits assertions)",
+    "/app/frontend/src/pages/Dashboard.jsx (fixed auth-loading race: now waits for authLoading before deciding to redirect)"
+  ],
+  "success_rate": {"backend": "100% (42/42)", "frontend": "100% (landing 45 tools + 5 cats + 0 AI tiles; pricing no-AI; dashboard plan/ops/TTL + recent files list + del-one + del-all; tool /t/protect renders)"},
+  "test_credentials": "test1@ughpdf.com / testpass123 (lifetime on this run — Header showed TESTER + PRO badge). Ephemeral users are created via /api/auth/signup and optionally /api/billing/mock-unlock.",
+  "seed_data_creation": "A handful of user_jobs docs were created during testing across ephemeral users; all auto-expire in 24h via TTL index.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend: /app/backend/tests/test_ughpdf_backend.py (42 tests, ~12s). Key focus areas: AI endpoints must 404, user_public has NO ai_credits, /api/user/jobs GET/DELETE + delete-all endpoints, MongoDB TTL index on user_jobs.expires_at (expireAfterSeconds=0) + compound (user_id,created_at desc). Frontend: Dashboard.jsx uses `authLoading` gate now — do NOT revert. Auth login testid is 'auth-submit' (get_by_role button 'Log in' is ambiguous — also matches the header 'LOG IN' link). Landing has 6 cat-* testids (5 + 'all' filter). Header shows 'X ops today', not credits.",
+  "rca of the issue": "HIGH-priority bug fixed in Dashboard.jsx: AuthProvider initializes user=null AND loading=true, then asynchronously calls /auth/me. Dashboard's useEffect ran with the initial null and immediately nav('/login')ed, so a logged-in user could never see the Dashboard on direct navigation or hard refresh. Reproduction: log in → visit /dashboard → gets redirected to /login (but header still shows the logged-in user). Fix: `if (authLoading) return;` guard before the redirect + include authLoading in dependency array. Verified fix: /dashboard now renders plan/ops/TTL/recent-files, delete-one and delete-all both work end-to-end."
+}

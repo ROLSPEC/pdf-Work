@@ -1,4 +1,4 @@
-// Ugh!PDF tool registry (client-side mirror).
+// Ugh!PDF tool registry (client-side mirror) — AI removed.
 export const CATEGORIES = [
   { id: "all", name: "All", color: "#111827", desc: "Every tool in one place" },
   { id: "convert", name: "Convert", color: "#4F46E5", desc: "18 tools to change format" },
@@ -6,10 +6,9 @@ export const CATEGORIES = [
   { id: "optimize", name: "Optimize", color: "#F59E0B", desc: "5 tools to shrink & fix" },
   { id: "edit", name: "Edit", color: "#8B5CF6", desc: "9 tools to modify content" },
   { id: "security", name: "Security", color: "#EF4444", desc: "8 tools to protect & sign" },
-  { id: "ai", name: "AI Studio", color: "#EC4899", desc: "8 AI-powered tools" },
 ];
 
-// engine: "local" (in browser), "server" (backend), "ai" (AI + backend)
+// engine: "local" (in browser), "server" (backend)
 export const TOOLS = [
   // CONVERT (18)
   { id: "pdf-to-word", name: "PDF → Word", cat: "convert", engine: "server", desc: "Editable .docx" },
@@ -65,16 +64,6 @@ export const TOOLS = [
   { id: "esign-request", name: "Send for Sign", cat: "security", engine: "server", desc: "Request others" },
   { id: "compare", name: "Compare PDFs", cat: "security", engine: "server", desc: "Pixel diff" },
   { id: "certify", name: "Certify PDF", cat: "security", engine: "server", desc: "Anti-tamper" },
-
-  // AI (8)
-  { id: "ai-chat", name: "Chat with PDF", cat: "ai", engine: "ai", credits: 1, desc: "RAG · cited answers" },
-  { id: "ai-summarize", name: "Summarize", cat: "ai", engine: "ai", credits: 2, desc: "Structured summary" },
-  { id: "ai-redact", name: "AI PII Redactor", cat: "ai", engine: "ai", credits: 3, desc: "Auto-find PII" },
-  { id: "ai-extract", name: "Extract Data", cat: "ai", engine: "ai", credits: 3, desc: "Invoices → JSON" },
-  { id: "ai-audiobook", name: "Audiobook", cat: "ai", engine: "ai", credits: 5, desc: "Narrated MP3" },
-  { id: "ai-visual-diff", name: "Visual Diff", cat: "ai", engine: "ai", credits: 3, desc: "Semantic diff" },
-  { id: "ai-math", name: "Homework Solver", cat: "ai", engine: "ai", credits: 2, desc: "Step-by-step" },
-  { id: "ai-ocr", name: "Smart OCR", cat: "ai", engine: "ai", credits: 2, desc: "Skips searchable" },
 ];
 
 export const TOOL_MAP = Object.fromEntries(TOOLS.map((t) => [t.id, t]));

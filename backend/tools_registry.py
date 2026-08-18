@@ -1,4 +1,4 @@
-"""Registry of all 52 tools in Ugh!PDF grouped by category."""
+"""Registry of all 45 tools in Ugh!PDF grouped by category (AI removed)."""
 
 TOOLS = [
     # ===== CONVERT (18) =====
@@ -55,16 +55,6 @@ TOOLS = [
     {"id": "esign-request", "name": "Send for Signature", "cat": "security", "engine": "server", "desc": "Request e-sign from others"},
     {"id": "compare", "name": "Compare PDFs", "cat": "security", "engine": "server", "desc": "Pixel-level diff of two PDFs"},
     {"id": "certify", "name": "Certify PDF", "cat": "security", "engine": "server", "desc": "Lock PDF against tampering"},
-
-    # ===== AI (8) =====
-    {"id": "ai-chat", "name": "Chat with PDF", "cat": "ai", "engine": "ai", "credits": 1, "desc": "Ask questions, get cited answers"},
-    {"id": "ai-summarize", "name": "AI Summarizer", "cat": "ai", "engine": "ai", "credits": 2, "desc": "Get a fast, structured summary"},
-    {"id": "ai-redact", "name": "AI PII Redactor", "cat": "ai", "engine": "ai", "credits": 3, "desc": "Auto-detect names, SSN, emails"},
-    {"id": "ai-extract", "name": "Structured Extract", "cat": "ai", "engine": "ai", "credits": 3, "desc": "Invoices, resumes → JSON/CSV"},
-    {"id": "ai-audiobook", "name": "Audiobook Generator", "cat": "ai", "engine": "ai", "credits": 5, "desc": "Turn PDF into narrated MP3"},
-    {"id": "ai-visual-diff", "name": "Visual Diff", "cat": "ai", "engine": "ai", "credits": 3, "desc": "Semantic + pixel comparison"},
-    {"id": "ai-math", "name": "Homework Solver", "cat": "ai", "engine": "ai", "credits": 2, "desc": "Solve math step-by-step"},
-    {"id": "ai-ocr", "name": "Smart OCR", "cat": "ai", "engine": "ai", "credits": 2, "desc": "OCR that skips searchable pages"},
 ]
 
 CATEGORIES = [
@@ -73,7 +63,6 @@ CATEGORIES = [
     {"id": "optimize", "name": "Optimize", "desc": "5 tools to shrink & fix", "color": "#F59E0B"},
     {"id": "edit", "name": "Edit", "desc": "9 tools to modify content", "color": "#8B5CF6"},
     {"id": "security", "name": "Security", "desc": "8 tools to protect & sign", "color": "#EF4444"},
-    {"id": "ai", "name": "AI Studio", "desc": "8 AI-powered tools", "color": "#EC4899"},
 ]
 
 TOOL_MAP = {t["id"]: t for t in TOOLS}

@@ -8,9 +8,8 @@ import { toast } from "sonner";
 import DropZone from "@/components/DropZone";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
-import { Sparkle, ArrowLeft, Lock, Cloud, Download, WarningCircle } from "@phosphor-icons/react";
+import { ArrowLeft, Lock, Cloud, Download, WarningCircle } from "@phosphor-icons/react";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 export default function ToolPage() {
@@ -34,10 +33,10 @@ export default function ToolPage() {
   if (!tool) return <div className="p-10 text-center font-display text-2xl">Tool not found. <Link to="/" className="underline">Go home</Link></div>;
 
   const needsAuth = tool.engine !== "local";
-  const needsMulti = tool.id === "merge" || tool.id === "jpg-to-pdf" || tool.id === "id-card" || tool.id === "ai-visual-diff";
+  const needsMulti = tool.id === "merge" || tool.id === "jpg-to-pdf" || tool.id === "id-card";
 
   const requireAuth = () => {
-    if (!user && needsAuth) { toast.error("Please log in to use cloud & AI tools."); nav("/login"); return false; }
+    if (!user && needsAuth) { toast.error("Please log in to use cloud tools."); nav("/login"); return false; }
     return true;
   };
 
@@ -72,12 +71,9 @@ export default function ToolPage() {
     setBusy(true); setError(null); setProgress(15); setResult(null);
     try {
       const fd = new FormData();
-      if (tool.id === "ai-visual-diff") { fd.append("file_a", files[0]); fd.append("file_b", files[1]); }
-      else { fd.append("file", files[0]); }
+      fd.append("file", files[0]);
       Object.entries(opts).forEach(([k, v]) => v != null && fd.append(k, v));
-
       const endpoint = pickEndpoint(tool);
-      const isJson = tool.engine === "ai" || tool.id === "ai-ocr";
       setProgress(45);
       const resp = await fetch(`${API}${endpoint}`, {
         method: "POST",
@@ -90,14 +86,9 @@ export default function ToolPage() {
         let msg = t; try { msg = JSON.parse(t).detail || msg; } catch { }
         throw new Error(msg || `HTTP ${resp.status}`);
       }
-      if (isJson) {
-        const data = await resp.json();
-        setResult({ kind: "json", data });
-      } else {
-        const blob = await resp.blob();
-        const url = URL.createObjectURL(blob);
-        setResult({ kind: "file", url, name: `${tool.id}-${files[0].name}` });
-      }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      setResult({ kind: "file", url, name: `${tool.id}-${files[0].name}` });
       setProgress(100);
       toast.success("Done!");
       refresh();
@@ -111,9 +102,9 @@ export default function ToolPage() {
 
   const engineBadge = (
     <span className="brut-chip bg-card">
-      {tool.engine === "local" && <><Lock size={11} weight="bold" /> Local · Private</>}
-      {tool.engine === "server" && <><Cloud size={11} weight="bold" /> Cloud · 1h TTL</>}
-      {tool.engine === "ai" && <><Sparkle size={11} weight="fill" className="text-accent" /> AI · {tool.credits} credit{tool.credits > 1 ? "s" : ""}</>}
+      {tool.engine === "local"
+        ? <><Lock size={11} weight="bold" /> Local · Private</>
+        : <><Cloud size={11} weight="bold" /> Cloud · deleted in 24h</>}
     </span>
   );
 
@@ -155,9 +146,7 @@ export default function ToolPage() {
                   </li>
                 ))}
               </ul>
-              <button onClick={() => setFiles([])} className="mt-3 text-xs font-mono uppercase tracking-widest font-bold hover:underline" data-testid="clear-files">
-                × Clear
-              </button>
+              <button onClick={() => setFiles([])} className="mt-3 text-xs font-mono uppercase tracking-widest font-bold hover:underline" data-testid="clear-files">× Clear</button>
             </div>
           )}
 
@@ -183,7 +172,6 @@ export default function ToolPage() {
                   <Download size={14} weight="bold" /> Download {result.name}
                 </a>
               )}
-              {result.kind === "json" && <JsonResult data={result.data} />}
             </div>
           )}
         </div>
@@ -195,19 +183,15 @@ export default function ToolPage() {
               disabled={!canRun}
               onClick={() => (tool.engine === "local" ? runLocal() : runServer())}
               data-testid="tool-run"
-              className={`w-full brut-sm brut-hover font-mono text-xs uppercase tracking-widest font-bold py-3 flex items-center justify-center gap-2 ${tool.engine === "ai" ? "btn-accent-ink" : "bg-primary text-primary-foreground"} disabled:opacity-40 disabled:pointer-events-none`}
+              className="w-full brut-sm brut-hover btn-primary-ink font-mono text-xs uppercase tracking-widest font-bold py-3 flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none"
             >
-              {tool.engine === "ai" && <Sparkle size={14} weight="fill" />}
               {busy ? "Working…" : `Run ${tool.name}`}
             </button>
-            {tool.engine === "ai" && (
-              <p className="text-xs font-medium mt-3">
-                Costs <b>{tool.credits}</b> credit{tool.credits > 1 ? "s" : ""}.
-                {user ? ` You have ${user.ai_credits}.` : " Log in to use AI."}
-              </p>
+            {tool.engine === "server" && !user && (
+              <p className="text-xs mt-3 font-medium">Log in to use cloud tools.</p>
             )}
           </div>
-          <div className="brut bg-sun/30 p-5">
+          <div className="brut bg-primary/40 p-5">
             <div className="text-[10px] font-mono uppercase tracking-widest font-bold mb-2">↳ How it works</div>
             <ol className="text-sm font-medium space-y-1.5 list-decimal list-inside">
               <li>Drop your file</li>
@@ -222,72 +206,10 @@ export default function ToolPage() {
   );
 }
 
-function JsonResult({ data }) {
-  return (
-    <div className="space-y-3">
-      {data.answer && (
-        <div>
-          <div className="whitespace-pre-wrap text-sm font-medium">{data.answer}</div>
-          {Array.isArray(data.citations) && data.citations.length > 0 && (
-            <div className="mt-4">
-              <div className="font-mono text-[10px] uppercase tracking-widest font-bold mb-2">
-                ↳ Retrieved · RAG · {data.n_chunks_used}/{data.n_chunks_total} chunks
-              </div>
-              <div className="space-y-2">
-                {data.citations.map((c, i) => (
-                  <div key={i} className="brut-sm bg-card p-3">
-                    <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-widest font-bold">
-                      <span>[p.{c.page}]</span>
-                      <span className="opacity-60">score {c.score}</span>
-                    </div>
-                    <p className="text-xs mt-1 font-medium text-muted-foreground">{c.snippet}…</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-      {data.summary && <div className="whitespace-pre-wrap text-sm font-medium">{data.summary}</div>}
-      {data.solution && <div className="whitespace-pre-wrap text-sm font-medium">{data.solution}</div>}
-      {data.diff && <div className="whitespace-pre-wrap text-sm font-medium">{data.diff}</div>}
-      {data.findings && (
-        <div>
-          <p className="font-mono text-xs uppercase tracking-widest font-bold mb-2">{data.count} PII items</p>
-          <ul className="space-y-1 max-h-64 overflow-auto">
-            {data.findings.map((f, i) => (
-              <li key={i} className="flex justify-between border-b-2 border-border py-1.5">
-                <span className="font-mono text-[10px] uppercase tracking-widest font-bold">{f.type}</span>
-                <span className="font-mono text-xs">{f.value}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {data.data && (
-        <pre className="font-mono text-xs overflow-auto max-h-96 btn-ink p-3 border-2 border-border">{JSON.stringify(data.data, null, 2)}</pre>
-      )}
-      {data.chapters && (
-        <div className="space-y-2">
-          <p className="text-xs font-medium">{data.note}</p>
-          {data.chapters.slice(0, 3).map((c, i) => (
-            <details key={i} className="brut-sm bg-card p-3">
-              <summary className="cursor-pointer text-sm font-bold">Chapter {c.chapter}: {c.title}</summary>
-              <p className="text-xs mt-2 font-medium whitespace-pre-wrap">{c.text}</p>
-            </details>
-          ))}
-        </div>
-      )}
-      {data.text_by_page && <p className="text-sm font-medium">{data.message}</p>}
-    </div>
-  );
-}
-
 function parseRanges(s) { return s.split(",").map((p) => { const [a, b] = p.split("-").map((x) => parseInt(x.trim(), 10)); return [a || 1, b || a || 1]; }); }
 function parsePages(s) { return s.split(",").map((x) => parseInt(x.trim(), 10)).filter(Boolean); }
 function pickEndpoint(tool) {
-  const direct = new Set(["protect", "unlock", "flatten", "repair", "pdf-to-text", "pdf-to-markdown", "bates",
-    "ai-chat", "ai-summarize", "ai-extract", "ai-redact", "ai-math", "ai-ocr", "ai-visual-diff", "ai-audiobook"]);
+  const direct = new Set(["protect", "unlock", "flatten", "repair", "pdf-to-text", "pdf-to-markdown", "bates"]);
   return direct.has(tool.id) ? `/tools/${tool.id}/run` : `/tools/${tool.id}/run-generic`;
 }
 
@@ -331,9 +253,5 @@ function ToolConfig({ tool, opts, setOpts }) {
       {wrap("Start #", <Input type="number" value={opts.start || ""} placeholder="1" onChange={(e) => set("start", e.target.value)} className={inputCls} data-testid="opt-start" />)}
     </div>
   );
-  if (tool.id === "ai-chat") return wrap("Ask a question",
-    <Textarea value={opts.question || ""} rows={3} placeholder="What is this document about?" onChange={(e) => set("question", e.target.value)} className="rounded-none border-2 border-border font-mono" data-testid="opt-question" />);
-  if (tool.id === "ai-extract") return wrap("Schema hint (optional)",
-    <Input value={opts.hint || ""} placeholder="invoice, resume…" onChange={(e) => set("hint", e.target.value)} className={inputCls} data-testid="opt-hint" />);
   return null;
 }

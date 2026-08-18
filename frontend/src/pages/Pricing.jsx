@@ -2,28 +2,28 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
-import { Check, X, Sparkle } from "@phosphor-icons/react";
+import { Check, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 const FEATURES_FREE = [
-  { text: "All 12 in-browser tools (merge, split, watermark…)", ok: true },
+  { text: "All 12 in-browser tools · unlimited", ok: true },
   { text: "25 MB max file size", ok: true },
-  { text: "10 files / day (cloud tools)", ok: true },
-  { text: "5 AI credits / month", ok: true },
-  { text: "Unlimited AI credits", ok: false },
+  { text: "10 cloud ops / day", ok: true },
+  { text: "24-hour auto-delete of history", ok: true },
   { text: "100 MB max file size", ok: false },
-  { text: "BYOK — bring your own OpenAI/Gemini key", ok: false },
+  { text: "200 cloud ops / day", ok: false },
   { text: "Priority processing queue", ok: false },
+  { text: "Support the project ❤️", ok: false },
 ];
 
 const FEATURES_PAID = [
   { text: "Everything in Free, plus…", ok: true },
   { text: "100 MB max file size", ok: true },
-  { text: "Unlimited cloud tools (200 ops/day)", ok: true },
-  { text: "50 AI credits / month (auto-refill)", ok: true },
-  { text: "BYOK unlimited AI at zero cost", ok: true },
-  { text: "Priority processing", ok: true },
-  { text: "Support us + future perks", ok: true },
+  { text: "200 cloud ops / day (basically unlimited)", ok: true },
+  { text: "Priority processing queue", ok: true },
+  { text: "Support the project ❤️", ok: true },
+  { text: "One-time · geo-priced", ok: true },
+  { text: "No renewals. Ever.", ok: true },
   { text: "One coin. Forever.", ok: true },
 ];
 
@@ -44,9 +44,7 @@ export default function Pricing() {
     setBusy(true);
     try {
       const { data } = await api.post("/billing/checkout", { origin_url: window.location.origin });
-      if (data.mock) {
-        toast.success("Mock unlock: enjoy lifetime access (dev).");
-      }
+      if (data.mock) toast.success("Mock unlock: enjoy lifetime access (dev).");
       window.location.href = data.url;
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Checkout failed");
@@ -58,7 +56,7 @@ export default function Pricing() {
     <div className="max-w-5xl mx-auto px-6 py-16 paper-grid">
       <div className="text-center max-w-2xl mx-auto">
         <div className="brut-chip inline-flex sticker-rotate-r btn-accent-ink" data-testid="pricing-chip">
-          <Sparkle size={12} weight="fill" /> one coin. forever.
+          one coin. forever.
         </div>
         <h1 className="font-display text-5xl sm:text-6xl tracking-tighter mt-6">
           Pricing that respects your time.
@@ -72,11 +70,10 @@ export default function Pricing() {
       </div>
 
       <div className="grid md:grid-cols-2 gap-6 mt-12">
-        <div className="brut bg-card p-8">
+        <div className="brut bg-card p-8" data-testid="free-card">
           <div className="brut-chip mb-4">free · always</div>
           <div className="font-display text-6xl tracking-tighter">$0</div>
           <p className="text-xs font-mono uppercase tracking-widest mt-2">forever · no card</p>
-
           <ul className="space-y-2 mt-6">
             {FEATURES_FREE.map((f, i) => (
               <li key={i} className={`flex items-start gap-2 text-sm font-medium ${!f.ok ? "opacity-40 line-through" : ""}`}>
@@ -102,7 +99,6 @@ export default function Pricing() {
             <div className="font-mono text-xs uppercase tracking-widest font-bold">one-time · {geo.currency}</div>
           </div>
           <p className="text-xs font-mono uppercase tracking-widest mt-2">lifetime · no renewals · no upsells</p>
-
           <ul className="space-y-2 mt-6">
             {FEATURES_PAID.map((f, i) => (
               <li key={i} className="flex items-start gap-2 text-sm font-bold">
@@ -125,9 +121,9 @@ export default function Pricing() {
       </div>
 
       <div className="mt-16 grid md:grid-cols-3 gap-4">
-        <FAQ q="Why so cheap?" a="We want you to stop hitting paywalls. $1 covers our server + AI costs long enough for you to fall in love and tell friends." />
-        <FAQ q="What's local vs cloud?" a="12 tools (merge, split, watermark, page numbers, etc.) run 100% in your browser — nothing leaves your device. The rest need our server; files are auto-deleted after 1h." />
-        <FAQ q="What if I run out of AI credits?" a="Plug in your own OpenAI or Gemini API key (BYOK) from the dashboard. Unlimited AI at zero cost to us." />
+        <FAQ q="Why so cheap?" a="We want you to stop hitting paywalls. $1 covers our server long enough for you to fall in love and tell friends." />
+        <FAQ q="What's local vs cloud?" a="12 tools (merge, split, watermark, page numbers, etc.) run 100% in your browser — nothing leaves your device. The rest need our server; jobs auto-delete in 24h." />
+        <FAQ q="Do you keep my files?" a="No. Files are never permanently stored. We only keep a metadata trail for 24 hours so you can see recent activity — and you can delete it any time." />
       </div>
     </div>
   );

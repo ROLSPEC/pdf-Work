@@ -1,18 +1,17 @@
-"""Ugh!PDF backend — auth, tools, AI, billing."""
+"""Ugh!PDF backend — auth, tools, jobs, billing (no AI, 24h ephemeral job history)."""
 import os
 import io
 import uuid
-import hashlib
 import logging
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Annotated
+from typing import Optional, Annotated
 
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, Form, Header, Request
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, EmailStr, Field, BeforeValidator, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, BeforeValidator
 from bson import ObjectId
 import bcrypt
 import jwt
@@ -23,18 +22,16 @@ load_dotenv(ROOT / ".env")
 
 from tools_registry import TOOLS, CATEGORIES, TOOL_MAP
 import pdf_ops
-import ai_service
 
 MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ["DB_NAME"]
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret")
 JWT_ALG = os.environ.get("JWT_ALGORITHM", "HS256")
-FREE_CREDITS = int(os.environ.get("FREE_AI_CREDITS_MONTHLY", "5"))
-PAID_CREDITS = int(os.environ.get("PAID_AI_CREDITS_MONTHLY", "50"))
 FREE_DAILY = int(os.environ.get("FREE_DAILY_OPS", "10"))
 PAID_DAILY = int(os.environ.get("PAID_DAILY_OPS", "200"))
 MAX_MB_FREE = int(os.environ.get("MAX_FILE_MB_FREE", "25"))
 MAX_MB_PAID = int(os.environ.get("MAX_FILE_MB_PAID", "100"))
+FILE_TTL_HOURS = int(os.environ.get("FILE_TTL_HOURS", "24"))
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
@@ -54,19 +51,6 @@ def _oid(v):
 
 
 PyObjectId = Annotated[str, BeforeValidator(_oid)]
-
-
-class UserOut(BaseModel):
-    id: str
-    email: EmailStr
-    name: str
-    plan: str  # "free" | "lifetime"
-    ai_credits: int
-    ai_credits_reset_at: str
-    ops_today: int
-    ops_reset_at: str
-    byok_openai: bool = False
-    byok_gemini: bool = False
 
 
 class SignupIn(BaseModel):
@@ -109,10 +93,6 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _monthly_reset(dt: datetime) -> datetime:
-    return (dt + timedelta(days=30))
-
-
 def _daily_reset(dt: datetime) -> datetime:
     return dt + timedelta(days=1)
 
@@ -120,11 +100,6 @@ def _daily_reset(dt: datetime) -> datetime:
 async def _ensure_reset(u: dict) -> dict:
     now = _now()
     changed = False
-    reset_ai = datetime.fromisoformat(u.get("ai_credits_reset_at", now.isoformat()))
-    if now >= reset_ai:
-        u["ai_credits"] = PAID_CREDITS if u.get("plan") == "lifetime" else FREE_CREDITS
-        u["ai_credits_reset_at"] = _monthly_reset(now).isoformat()
-        changed = True
     reset_ops = datetime.fromisoformat(u.get("ops_reset_at", now.isoformat()))
     if now >= reset_ops:
         u["ops_today"] = 0
@@ -132,8 +107,6 @@ async def _ensure_reset(u: dict) -> dict:
         changed = True
     if changed:
         await db.users.update_one({"_id": u["_id"]}, {"$set": {
-            "ai_credits": u["ai_credits"],
-            "ai_credits_reset_at": u["ai_credits_reset_at"],
             "ops_today": u["ops_today"],
             "ops_reset_at": u["ops_reset_at"],
         }})
@@ -160,12 +133,10 @@ def user_public(u: dict) -> dict:
         "email": u["email"],
         "name": u.get("name") or u["email"].split("@")[0],
         "plan": u.get("plan", "free"),
-        "ai_credits": u.get("ai_credits", 0),
-        "ai_credits_reset_at": u.get("ai_credits_reset_at", _now().isoformat()),
         "ops_today": u.get("ops_today", 0),
         "ops_reset_at": u.get("ops_reset_at", _now().isoformat()),
-        "byok_openai": bool(u.get("byok_openai_key")),
-        "byok_gemini": bool(u.get("byok_gemini_key")),
+        "max_file_mb": MAX_MB_PAID if u.get("plan") == "lifetime" else MAX_MB_FREE,
+        "daily_ops_limit": PAID_DAILY if u.get("plan") == "lifetime" else FREE_DAILY,
     }
 
 
@@ -179,8 +150,6 @@ async def _create_user(email: str, name: Optional[str], pw_hash: Optional[str], 
         "password_hash": pw_hash,
         "google_sub": google_sub,
         "plan": "free",
-        "ai_credits": FREE_CREDITS,
-        "ai_credits_reset_at": _monthly_reset(now).isoformat(),
         "ops_today": 0,
         "ops_reset_at": _daily_reset(now).isoformat(),
         "created_at": now.isoformat(),
@@ -232,19 +201,6 @@ async def me(user=Depends(get_current_user)):
     return user_public(user)
 
 
-@api.post("/auth/byok")
-async def set_byok(body: dict, user=Depends(get_current_user)):
-    update = {}
-    if "openai_key" in body:
-        update["byok_openai_key"] = body["openai_key"] or None
-    if "gemini_key" in body:
-        update["byok_gemini_key"] = body["gemini_key"] or None
-    if update:
-        await db.users.update_one({"_id": user["_id"]}, {"$set": update})
-    u = await db.users.find_one({"_id": user["_id"]})
-    return user_public(u)
-
-
 # ============ Tools registry ============
 @api.get("/tools")
 async def list_tools():
@@ -259,17 +215,30 @@ async def get_tool(tool_id: str):
     return t
 
 
-# ============ Usage enforcement ============
-async def _consume_op(user: dict, credits: int = 0):
+# ============ Usage + Job history (24h auto-expiry) ============
+async def _log_job(user: dict, tool_id: str, file: UploadFile, size: int, status: str = "completed", error: Optional[str] = None):
+    now = _now()
+    engine = (TOOL_MAP.get(tool_id) or {}).get("engine", "server")
+    await db.user_jobs.insert_one({
+        "_id": str(uuid.uuid4()),
+        "user_id": user["_id"],
+        "tool_id": tool_id,
+        "tool_name": (TOOL_MAP.get(tool_id) or {}).get("name", tool_id),
+        "filename": (file.filename or "unknown"),
+        "size_bytes": size,
+        "engine": engine,
+        "status": status,
+        "error": error,
+        "created_at": now,
+        "expires_at": now + timedelta(hours=FILE_TTL_HOURS),
+    })
+
+
+async def _consume_op(user: dict):
     daily_cap = PAID_DAILY if user.get("plan") == "lifetime" else FREE_DAILY
     if user.get("ops_today", 0) >= daily_cap:
         raise HTTPException(429, f"Daily limit reached ({daily_cap}). Upgrade for more.")
-    if credits > 0 and user.get("ai_credits", 0) < credits:
-        raise HTTPException(402, "Out of AI credits")
-    inc = {"ops_today": 1}
-    if credits > 0:
-        inc["ai_credits"] = -credits
-    await db.users.update_one({"_id": user["_id"]}, {"$inc": inc})
+    await db.users.update_one({"_id": user["_id"]}, {"$inc": {"ops_today": 1}})
 
 
 async def _read_upload(f: UploadFile, user: dict) -> bytes:
@@ -278,6 +247,42 @@ async def _read_upload(f: UploadFile, user: dict) -> bytes:
     if len(data) > limit_mb * 1024 * 1024:
         raise HTTPException(413, f"File too large. Max {limit_mb}MB on your plan.")
     return data
+
+
+@api.get("/user/jobs")
+async def list_jobs(user=Depends(get_current_user)):
+    """List the current user's recent (< 24h) job history. Metadata only — no file bytes are stored."""
+    cursor = db.user_jobs.find({"user_id": user["_id"]}).sort("created_at", -1).limit(200)
+    out = []
+    async for j in cursor:
+        out.append({
+            "id": j["_id"],
+            "tool_id": j["tool_id"],
+            "tool_name": j.get("tool_name"),
+            "filename": j.get("filename"),
+            "size_bytes": j.get("size_bytes", 0),
+            "engine": j.get("engine"),
+            "status": j.get("status"),
+            "created_at": (j["created_at"].isoformat() if isinstance(j["created_at"], datetime) else j["created_at"]),
+            "expires_at": (j["expires_at"].isoformat() if isinstance(j["expires_at"], datetime) else j["expires_at"]),
+        })
+    return {"jobs": out, "ttl_hours": FILE_TTL_HOURS}
+
+
+@api.delete("/user/jobs/{job_id}")
+async def delete_job(job_id: str, user=Depends(get_current_user)):
+    """Let a user delete their own job record."""
+    r = await db.user_jobs.delete_one({"_id": job_id, "user_id": user["_id"]})
+    if r.deleted_count == 0:
+        raise HTTPException(404, "Job not found")
+    return {"deleted": True}
+
+
+@api.delete("/user/jobs")
+async def delete_all_jobs(user=Depends(get_current_user)):
+    """Nuke the user's entire history."""
+    r = await db.user_jobs.delete_many({"user_id": user["_id"]})
+    return {"deleted": r.deleted_count}
 
 
 # ============ Server tools ============
@@ -294,6 +299,7 @@ async def run_protect(file: UploadFile = File(...), password: str = Form(...), u
     data = await _read_upload(file, user)
     await _consume_op(user)
     out = pdf_ops.protect(data, password)
+    await _log_job(user, "protect", file, len(data))
     return _pdf_response(out, f"protected-{file.filename}")
 
 
@@ -304,7 +310,9 @@ async def run_unlock(file: UploadFile = File(...), password: str = Form(...), us
     try:
         out = pdf_ops.unlock(data, password)
     except Exception:
+        await _log_job(user, "unlock", file, len(data), status="failed", error="wrong password")
         raise HTTPException(400, "Wrong password or file cannot be unlocked")
+    await _log_job(user, "unlock", file, len(data))
     return _pdf_response(out, f"unlocked-{file.filename}")
 
 
@@ -312,7 +320,9 @@ async def run_unlock(file: UploadFile = File(...), password: str = Form(...), us
 async def run_flatten(file: UploadFile = File(...), user=Depends(get_current_user)):
     data = await _read_upload(file, user)
     await _consume_op(user)
-    return _pdf_response(pdf_ops.flatten(data), f"flat-{file.filename}")
+    out = pdf_ops.flatten(data)
+    await _log_job(user, "flatten", file, len(data))
+    return _pdf_response(out, f"flat-{file.filename}")
 
 
 @api.post("/tools/repair/run")
@@ -322,7 +332,9 @@ async def run_repair(file: UploadFile = File(...), user=Depends(get_current_user
     try:
         out = pdf_ops.repair(data)
     except Exception as e:
+        await _log_job(user, "repair", file, len(data), status="failed", error=str(e)[:100])
         raise HTTPException(400, f"Could not repair: {e}")
+    await _log_job(user, "repair", file, len(data))
     return _pdf_response(out, f"repaired-{file.filename}")
 
 
@@ -331,6 +343,7 @@ async def run_pdf_to_text(file: UploadFile = File(...), user=Depends(get_current
     data = await _read_upload(file, user)
     await _consume_op(user)
     txt = pdf_ops.to_text_file(data)
+    await _log_job(user, "pdf-to-text", file, len(data))
     return StreamingResponse(io.BytesIO(txt), media_type="text/plain",
                              headers={"Content-Disposition": f'attachment; filename="{file.filename}.txt"'})
 
@@ -341,6 +354,7 @@ async def run_pdf_to_md(file: UploadFile = File(...), user=Depends(get_current_u
     await _consume_op(user)
     text = pdf_ops.extract_text(data)
     md = "# " + (file.filename or "Document") + "\n\n" + text.replace("[page ", "\n\n## Page ").replace("]\n", "\n\n")
+    await _log_job(user, "pdf-to-markdown", file, len(data))
     return StreamingResponse(io.BytesIO(md.encode("utf-8")), media_type="text/markdown",
                              headers={"Content-Disposition": f'attachment; filename="{file.filename}.md"'})
 
@@ -351,6 +365,7 @@ async def run_bates(file: UploadFile = File(...), prefix: str = Form("BATES"), s
     data = await _read_upload(file, user)
     await _consume_op(user)
     out = pdf_ops.bates_stamp(data, prefix, start)
+    await _log_job(user, "bates", file, len(data))
     return _pdf_response(out, f"bates-{file.filename}")
 
 
@@ -358,112 +373,8 @@ async def run_bates(file: UploadFile = File(...), prefix: str = Form("BATES"), s
 async def run_strip_meta(file: UploadFile = File(...), user=Depends(get_current_user)):
     data = await _read_upload(file, user)
     await _consume_op(user)
+    await _log_job(user, "exif-strip", file, len(data))
     return _pdf_response(pdf_ops.strip_metadata(data), f"clean-{file.filename}")
-
-
-# ============ AI Tools ============
-class ChatBody(BaseModel):
-    question: str
-
-
-@api.post("/tools/ai-chat/run")
-async def ai_chat(file: UploadFile = File(...), question: str = Form(...), user=Depends(get_current_user)):
-    data = await _read_upload(file, user)
-    await _consume_op(user, credits=1)
-    # RAG pipeline: build/reuse cached index → retrieve top-K chunks → LLM with citations
-    import rag
-    fh, chunks, vec, matrix = await rag.get_or_build_index(db, data)
-    retrieved = rag.retrieve(vec, matrix, chunks, question, k=5)
-    context = rag.build_context(retrieved)
-    answer = await ai_service.chat_with_rag(context, question)
-    return {
-        "answer": answer,
-        "citations": [{"page": r["page"], "score": round(r["score"], 3), "snippet": r["text"][:180]} for r in retrieved],
-        "file_hash": fh,
-        "n_chunks_total": len(chunks),
-        "n_chunks_used": len(retrieved),
-    }
-
-
-@api.post("/tools/ai-summarize/run")
-async def ai_summarize(file: UploadFile = File(...), user=Depends(get_current_user)):
-    data = await _read_upload(file, user)
-    await _consume_op(user, credits=2)
-    text = pdf_ops.extract_text(data)
-    summary = await ai_service.summarize(text)
-    return {"summary": summary}
-
-
-@api.post("/tools/ai-extract/run")
-async def ai_extract(file: UploadFile = File(...), hint: str = Form(""),
-                     user=Depends(get_current_user)):
-    data = await _read_upload(file, user)
-    await _consume_op(user, credits=3)
-    text = pdf_ops.extract_text(data)
-    result = await ai_service.extract_structured(text, hint)
-    return {"data": result}
-
-
-@api.post("/tools/ai-redact/run")
-async def ai_redact(file: UploadFile = File(...), user=Depends(get_current_user)):
-    data = await _read_upload(file, user)
-    await _consume_op(user, credits=3)
-    text = pdf_ops.extract_text(data)
-    findings = await ai_service.ai_pii_verify(text)
-    return {"findings": findings, "count": len(findings)}
-
-
-@api.post("/tools/ai-math/run")
-async def ai_math(file: UploadFile = File(...), user=Depends(get_current_user)):
-    data = await _read_upload(file, user)
-    await _consume_op(user, credits=2)
-    text = pdf_ops.extract_text(data)
-    solution = await ai_service.solve_math(text)
-    return {"solution": solution}
-
-
-@api.post("/tools/ai-ocr/run")
-async def ai_ocr(file: UploadFile = File(...), user=Depends(get_current_user)):
-    data = await _read_upload(file, user)
-    await _consume_op(user, credits=2)
-    pages = pdf_ops.extract_text_by_page(data)
-    scanned = [p["page"] for p in pages if len((p.get("text") or "").strip()) < 100]
-    already = [p["page"] for p in pages if len((p.get("text") or "").strip()) >= 100]
-    return {
-        "total_pages": len(pages),
-        "scanned_pages": scanned,
-        "already_searchable_pages": already,
-        "message": f"{len(scanned)} pages need OCR, {len(already)} already searchable (saved credits).",
-        "text_by_page": pages,
-    }
-
-
-@api.post("/tools/ai-visual-diff/run")
-async def ai_diff(file_a: UploadFile = File(...), file_b: UploadFile = File(...),
-                  user=Depends(get_current_user)):
-    a = await _read_upload(file_a, user)
-    b = await _read_upload(file_b, user)
-    await _consume_op(user, credits=3)
-    ta = pdf_ops.extract_text(a)
-    tb = pdf_ops.extract_text(b)
-    result = await ai_service.visual_diff(ta, tb)
-    return {"diff": result}
-
-
-@api.post("/tools/ai-audiobook/run")
-async def ai_audiobook(file: UploadFile = File(...), user=Depends(get_current_user)):
-    """Stub: real TTS pipeline requires OpenAI audio via emergentintegrations.
-    Returns extracted chapters as text with a message."""
-    data = await _read_upload(file, user)
-    await _consume_op(user, credits=5)
-    pages = pdf_ops.extract_text_by_page(data)
-    chapters = []
-    for i, p in enumerate(pages):
-        chapters.append({"chapter": i + 1, "title": f"Page {p['page']}", "text": p["text"][:2000]})
-    return {
-        "chapters": chapters,
-        "note": "MP3 generation coming soon. Chapters extracted and ready for narration.",
-    }
 
 
 # ============ Generic server-tool fallback ============
@@ -475,25 +386,24 @@ async def generic_stub(tool_id: str, file: UploadFile = File(...), user=Depends(
         raise HTTPException(404, "Unknown tool")
     data = await _read_upload(file, user)
     await _consume_op(user)
-    # For text-based conversions, return extracted text as the file
+    await _log_job(user, tool_id, file, len(data))
     if tool_id in ("pdf-to-html",):
         txt = pdf_ops.extract_text(data)
         html = f"<html><body><pre>{txt}</pre></body></html>"
         return StreamingResponse(io.BytesIO(html.encode()), media_type="text/html",
                                  headers={"Content-Disposition": f'attachment; filename="{file.filename}.html"'})
-    # Default: echo file back
     return _pdf_response(data, f"{tool_id}-{file.filename}")
 
 
 # ============ Billing (Stripe geo-priced) ============
 from billing import build_router as _billing_router
-api.include_router(_billing_router(db, get_current_user, PAID_CREDITS))
+api.include_router(_billing_router(db, get_current_user))
 
 
 # ============ Health ============
 @api.get("/")
 async def root():
-    return {"app": "Ugh!PDF", "tools": len(TOOLS)}
+    return {"app": "Ugh!PDF", "tools": len(TOOLS), "categories": len(CATEGORIES)}
 
 
 app.include_router(api)
@@ -504,6 +414,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def _init_indexes():
+    """Ensure MongoDB TTL index so job records auto-expire after 24h."""
+    try:
+        await db.user_jobs.create_index("expires_at", expireAfterSeconds=0)
+        await db.user_jobs.create_index([("user_id", 1), ("created_at", -1)])
+        log.info("user_jobs TTL + user_id indexes ensured")
+        # Drop any stale RAG cache from previous AI feature
+        await db.rag_indexes.drop()
+    except Exception as e:
+        log.warning(f"index init warn: {e}")
 
 
 @app.on_event("shutdown")
