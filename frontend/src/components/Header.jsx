@@ -21,7 +21,7 @@ export default function Header() {
     <header className="sticky top-0 z-40 border-b-2 border-border bg-background">
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
         <Link to="/" data-testid="brand-link" className="flex items-center gap-2 group">
-          <span className="inline-flex items-center justify-center w-9 h-9 brut-sm bg-primary text-primary-foreground font-display text-lg group-hover:sticker-rotate-l transition-transform">
+          <span className="inline-flex items-center justify-center w-9 h-9 brut-sm bg-primary text-white font-display text-lg group-hover:sticker-rotate-l transition-transform">
             !
           </span>
           <span className="font-display text-2xl leading-none">

@@ -72,7 +72,7 @@ class CheckoutIn(BaseModel):
     origin_url: str
 
 
-def build_router(db, get_current_user) -> APIRouter:
+def build_router(db, get_current_user, get_settings=None) -> APIRouter:
     router = APIRouter()
 
     STRIPE_KEY = os.environ.get("STRIPE_API_KEY") or os.environ.get("STRIPE_SECRET_KEY") or ""
@@ -99,6 +99,10 @@ def build_router(db, get_current_user) -> APIRouter:
     async def checkout(body: CheckoutIn, request: Request, user=Depends(get_current_user)):
         if user.get("plan") == "lifetime":
             raise HTTPException(409, "You're already on lifetime — no purchase needed 🎉")
+        if get_settings is not None:
+            s = await get_settings()
+            if not s.get("gateways", {}).get("stripe", {}).get("enabled", True):
+                raise HTTPException(403, "Stripe checkout is currently disabled by the administrator.")
         if not STRIPE_KEY:
             # Dev-mode fallback: mock unlock
             await db.users.update_one({"_id": user["_id"]}, {"$set": {"plan": "lifetime"}})

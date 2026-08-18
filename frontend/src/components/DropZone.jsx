@@ -20,7 +20,7 @@ export default function DropZone({ onFiles, multiple = false, accept, hint = "PD
       <span className="absolute bottom-2 left-2 font-mono text-[10px] text-muted-foreground">01 / 46</span>
       <span className="absolute bottom-2 right-2 font-mono text-[10px] text-muted-foreground">click ⌘</span>
 
-      <div className={`mx-auto w-16 h-16 brut-sm bg-primary text-primary-foreground flex items-center justify-center mb-4 ${isDragActive ? "sticker-rotate-l" : ""}`}>
+      <div className={`mx-auto w-16 h-16 brut-sm bg-white text-ink flex items-center justify-center mb-4 ${isDragActive ? "sticker-rotate-l" : ""}`}>
         <UploadSimple size={28} weight="bold" />
       </div>
       <div className="font-display text-2xl">

@@ -47,13 +47,13 @@ export default function Landing() {
                 Every PDF task,<br />
                 <span className="relative inline-block">
                   <span className="absolute -inset-1 -skew-y-2 bg-primary -z-0" aria-hidden />
-                  <span className="relative">in one clean spot.</span>
+                  <span className="relative" style={{ color: "#1a1a1a" }}>in one clean spot.</span>
                 </span>
               </h1>
               <p className="text-lg mt-6 max-w-xl font-medium">
                 Convert, sign, redact, merge, and 41 more. Half runs <b>in your browser</b>{" "}
                 (private, instant), the rest on our server and auto-deletes in 24h.{" "}
-                Get everything for a <b className="bg-primary px-1.5 -mx-0.5 border-2 border-border">one-time $1</b>.
+                Get everything for a <b className="bg-primary px-1.5 -mx-0.5 border-2 border-border" style={{ color: "#1a1a1a" }}>one-time $1</b>.
               </p>
               <div className="flex flex-wrap gap-3 mt-8">
                 <button onClick={() => document.getElementById("tools-grid")?.scrollIntoView({ behavior: "smooth" })}

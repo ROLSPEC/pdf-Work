@@ -2,13 +2,14 @@ import { Link } from "react-router-dom";
 import { Lock, Cloud } from "@phosphor-icons/react";
 
 // Inline style safeguards — some HSL vars weren't being picked up by Tailwind JIT
+// On-brand pastel tints per category (opaque so they read well in light AND dark mode)
 const CAT_STYLES = {
-  convert:  { bg: "hsl(0 0% 100%)",           fg: "hsl(0 0% 7%)" },
-  organize: { bg: "hsl(56 89% 61% / 0.55)",   fg: "hsl(0 0% 7%)" },
-  optimize: { bg: "hsl(38 92% 50% / 0.30)",   fg: "hsl(0 0% 7%)" },
-  edit:     { bg: "hsl(56 89% 61% / 0.35)",   fg: "hsl(0 0% 7%)" },
-  security: { bg: "hsl(3 100% 59% / 0.2)",    fg: "hsl(0 0% 7%)" },
-  search:   { bg: "hsl(0 0% 7%)",             fg: "hsl(0 0% 100%)" },
+  convert:  { bg: "hsl(243 80% 93%)",  fg: "hsl(243 60% 20%)" },  // indigo
+  organize: { bg: "hsl(160 62% 85%)",  fg: "hsl(160 70% 15%)" },  // emerald
+  optimize: { bg: "hsl(38 92% 84%)",   fg: "hsl(28 80% 20%)" },   // amber
+  edit:     { bg: "hsl(258 85% 92%)",  fg: "hsl(258 60% 25%)" },  // violet
+  security: { bg: "hsl(0 85% 91%)",    fg: "hsl(0 70% 25%)" },    // red
+  search:   { bg: "hsl(199 90% 87%)",  fg: "hsl(201 80% 18%)" },  // sky
 };
 
 export default function ToolCard({ tool }) {

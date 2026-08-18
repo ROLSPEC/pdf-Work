@@ -43,6 +43,85 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("ughpdf")
 
 
+# ============ Global settings (admin master control) ============
+import time as _time
+
+ADMIN_EMAIL = (os.environ.get("ADMIN_EMAIL") or "").strip().lower()
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or ""
+
+DEFAULT_SETTINGS = {
+    "_id": "global",
+    "maintenance_mode": False,
+    "gateways": {
+        "stripe": {"enabled": True, "mock": True},
+        "razorpay": {"enabled": True, "mock": True},
+        "paypal": {"enabled": True, "mock": True},
+    },
+    "disabled_tools": [],
+    "disabled_categories": [],
+    "limits": {"free_daily_ops": FREE_DAILY, "max_file_mb_free": MAX_MB_FREE},
+}
+
+# Effective free-plan limits, refreshed whenever settings are read.
+CURRENT_FREE_DAILY = FREE_DAILY
+CURRENT_MAX_MB_FREE = MAX_MB_FREE
+
+_settings_cache = {"data": None, "ts": 0.0}
+
+
+def _merge_settings(doc: dict) -> dict:
+    """Fill any missing keys with defaults so old docs stay valid."""
+    s = dict(DEFAULT_SETTINGS)
+    s.update(doc or {})
+    gw = dict(DEFAULT_SETTINGS["gateways"])
+    for k, v in (doc or {}).get("gateways", {}).items():
+        gw[k] = {**gw.get(k, {}), **(v or {})}
+    s["gateways"] = gw
+    lim = dict(DEFAULT_SETTINGS["limits"])
+    lim.update((doc or {}).get("limits", {}) or {})
+    s["limits"] = lim
+    return s
+
+
+async def get_settings(force: bool = False) -> dict:
+    global CURRENT_FREE_DAILY, CURRENT_MAX_MB_FREE
+    now = _time.time()
+    if not force and _settings_cache["data"] and (now - _settings_cache["ts"] < 5):
+        return _settings_cache["data"]
+    doc = await db.settings.find_one({"_id": "global"})
+    if not doc:
+        doc = dict(DEFAULT_SETTINGS)
+        await db.settings.insert_one(doc)
+    s = _merge_settings(doc)
+    _settings_cache["data"] = s
+    _settings_cache["ts"] = now
+    CURRENT_FREE_DAILY = int(s["limits"].get("free_daily_ops", FREE_DAILY))
+    CURRENT_MAX_MB_FREE = int(s["limits"].get("max_file_mb_free", MAX_MB_FREE))
+    return s
+
+
+async def save_settings(updates: dict):
+    await db.settings.update_one({"_id": "global"}, {"$set": updates}, upsert=True)
+    _settings_cache["ts"] = 0.0  # invalidate cache
+    await get_settings(force=True)
+
+
+def _tool_blocked(settings: dict, tool_id: str) -> bool:
+    if tool_id in (settings.get("disabled_tools") or []):
+        return True
+    cat = (TOOL_MAP.get(tool_id) or {}).get("cat")
+    if cat and cat in (settings.get("disabled_categories") or []):
+        return True
+    return False
+
+
+async def _ensure_tool_enabled(tool_id: str):
+    s = await get_settings()
+    if _tool_blocked(s, tool_id):
+        raise HTTPException(403, "This tool is currently disabled by the administrator.")
+
+
+
 # ============ Models ============
 def _oid(v):
     if isinstance(v, ObjectId):
@@ -128,15 +207,17 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
 
 
 def user_public(u: dict) -> dict:
+    is_life = u.get("plan") == "lifetime"
     return {
         "id": u["_id"],
         "email": u["email"],
         "name": u.get("name") or u["email"].split("@")[0],
         "plan": u.get("plan", "free"),
+        "is_admin": bool(u.get("is_admin")),
         "ops_today": u.get("ops_today", 0),
         "ops_reset_at": u.get("ops_reset_at", _now().isoformat()),
-        "max_file_mb": MAX_MB_PAID if u.get("plan") == "lifetime" else MAX_MB_FREE,
-        "daily_ops_limit": PAID_DAILY if u.get("plan") == "lifetime" else FREE_DAILY,
+        "max_file_mb": MAX_MB_PAID if is_life else CURRENT_MAX_MB_FREE,
+        "daily_ops_limit": PAID_DAILY if is_life else CURRENT_FREE_DAILY,
     }
 
 
@@ -204,7 +285,24 @@ async def me(user=Depends(get_current_user)):
 # ============ Tools registry ============
 @api.get("/tools")
 async def list_tools():
-    return {"categories": CATEGORIES, "tools": TOOLS}
+    s = await get_settings()
+    return {
+        "categories": CATEGORIES,
+        "tools": TOOLS,
+        "disabled_tools": s.get("disabled_tools", []),
+        "disabled_categories": s.get("disabled_categories", []),
+    }
+
+
+@api.get("/config")
+async def public_config():
+    """Public runtime config for the frontend (maintenance banner + feature toggles)."""
+    s = await get_settings()
+    return {
+        "maintenance_mode": bool(s.get("maintenance_mode")),
+        "disabled_tools": s.get("disabled_tools", []),
+        "disabled_categories": s.get("disabled_categories", []),
+    }
 
 
 @api.get("/tools/{tool_id}")
@@ -235,7 +333,11 @@ async def _log_job(user: dict, tool_id: str, file: UploadFile, size: int, status
 
 
 async def _consume_op(user: dict):
-    daily_cap = PAID_DAILY if user.get("plan") == "lifetime" else FREE_DAILY
+    if user.get("plan") == "lifetime":
+        daily_cap = PAID_DAILY
+    else:
+        await get_settings()
+        daily_cap = CURRENT_FREE_DAILY
     if user.get("ops_today", 0) >= daily_cap:
         raise HTTPException(429, f"Daily limit reached ({daily_cap}). Upgrade for more.")
     await db.users.update_one({"_id": user["_id"]}, {"$inc": {"ops_today": 1}})
@@ -243,7 +345,11 @@ async def _consume_op(user: dict):
 
 async def _read_upload(f: UploadFile, user: dict) -> bytes:
     data = await f.read()
-    limit_mb = MAX_MB_PAID if user.get("plan") == "lifetime" else MAX_MB_FREE
+    if user.get("plan") == "lifetime":
+        limit_mb = MAX_MB_PAID
+    else:
+        await get_settings()
+        limit_mb = CURRENT_MAX_MB_FREE
     if len(data) > limit_mb * 1024 * 1024:
         raise HTTPException(413, f"File too large. Max {limit_mb}MB on your plan.")
     return data
@@ -296,6 +402,7 @@ def _pdf_response(data: bytes, name: str = "output.pdf"):
 
 @api.post("/tools/protect/run")
 async def run_protect(file: UploadFile = File(...), password: str = Form(...), user=Depends(get_current_user)):
+    await _ensure_tool_enabled("protect")
     data = await _read_upload(file, user)
     await _consume_op(user)
     out = pdf_ops.protect(data, password)
@@ -305,6 +412,7 @@ async def run_protect(file: UploadFile = File(...), password: str = Form(...), u
 
 @api.post("/tools/unlock/run")
 async def run_unlock(file: UploadFile = File(...), password: str = Form(...), user=Depends(get_current_user)):
+    await _ensure_tool_enabled("unlock")
     data = await _read_upload(file, user)
     await _consume_op(user)
     try:
@@ -318,6 +426,7 @@ async def run_unlock(file: UploadFile = File(...), password: str = Form(...), us
 
 @api.post("/tools/flatten/run")
 async def run_flatten(file: UploadFile = File(...), user=Depends(get_current_user)):
+    await _ensure_tool_enabled("flatten")
     data = await _read_upload(file, user)
     await _consume_op(user)
     out = pdf_ops.flatten(data)
@@ -327,6 +436,7 @@ async def run_flatten(file: UploadFile = File(...), user=Depends(get_current_use
 
 @api.post("/tools/repair/run")
 async def run_repair(file: UploadFile = File(...), user=Depends(get_current_user)):
+    await _ensure_tool_enabled("repair")
     data = await _read_upload(file, user)
     await _consume_op(user)
     try:
@@ -340,6 +450,7 @@ async def run_repair(file: UploadFile = File(...), user=Depends(get_current_user
 
 @api.post("/tools/pdf-to-text/run")
 async def run_pdf_to_text(file: UploadFile = File(...), user=Depends(get_current_user)):
+    await _ensure_tool_enabled("pdf-to-text")
     data = await _read_upload(file, user)
     await _consume_op(user)
     txt = pdf_ops.to_text_file(data)
@@ -350,6 +461,7 @@ async def run_pdf_to_text(file: UploadFile = File(...), user=Depends(get_current
 
 @api.post("/tools/pdf-to-markdown/run")
 async def run_pdf_to_md(file: UploadFile = File(...), user=Depends(get_current_user)):
+    await _ensure_tool_enabled("pdf-to-markdown")
     data = await _read_upload(file, user)
     await _consume_op(user)
     text = pdf_ops.extract_text(data)
@@ -362,6 +474,7 @@ async def run_pdf_to_md(file: UploadFile = File(...), user=Depends(get_current_u
 @api.post("/tools/bates/run")
 async def run_bates(file: UploadFile = File(...), prefix: str = Form("BATES"), start: int = Form(1),
                     user=Depends(get_current_user)):
+    await _ensure_tool_enabled("bates")
     data = await _read_upload(file, user)
     await _consume_op(user)
     out = pdf_ops.bates_stamp(data, prefix, start)
@@ -371,6 +484,7 @@ async def run_bates(file: UploadFile = File(...), prefix: str = Form("BATES"), s
 
 @api.post("/tools/exif-strip-server/run")
 async def run_strip_meta(file: UploadFile = File(...), user=Depends(get_current_user)):
+    await _ensure_tool_enabled("exif-strip")
     data = await _read_upload(file, user)
     await _consume_op(user)
     await _log_job(user, "exif-strip", file, len(data))
@@ -383,6 +497,7 @@ async def run_search(file: UploadFile = File(...), query: str = Form(...),
     """Semantic search over a PDF — no LLM. Returns top-K chunks with page + score."""
     if not query.strip():
         raise HTTPException(400, "Query cannot be empty")
+    await _ensure_tool_enabled("pdf-search")
     data = await _read_upload(file, user)
     await _consume_op(user)
     import rag
@@ -406,6 +521,7 @@ async def generic_stub(tool_id: str, file: UploadFile = File(...), user=Depends(
     t = TOOL_MAP.get(tool_id)
     if not t:
         raise HTTPException(404, "Unknown tool")
+    await _ensure_tool_enabled(tool_id)
     data = await _read_upload(file, user)
     await _consume_op(user)
     await _log_job(user, tool_id, file, len(data))
@@ -421,20 +537,32 @@ async def generic_stub(tool_id: str, file: UploadFile = File(...), user=Depends(
 from billing import build_router as _billing_router
 from razorpay_gw import build_router as _razorpay_router, rzp_available
 from paypal_gw import build_router as _paypal_router, paypal_available
-api.include_router(_billing_router(db, get_current_user))
+from admin import build_admin_router as _admin_router
+api.include_router(_billing_router(db, get_current_user, get_settings))
 api.include_router(_razorpay_router(db, get_current_user))
 api.include_router(_paypal_router(db, get_current_user))
+api.include_router(_admin_router(db, get_current_user, get_settings, save_settings))
 
 
 @api.get("/billing/methods")
 async def billing_methods(request: Request):
     """Report which payment gateways are enabled + the recommended one for the caller's country."""
     from billing import _geo_country, resolve_currency
+    s = await get_settings()
+    gw_cfg = s.get("gateways", {})
     country = await _geo_country(request)
     currency, symbol = resolve_currency(country)
-    stripe_on = bool(os.environ.get("STRIPE_API_KEY") or os.environ.get("STRIPE_SECRET_KEY"))
-    razorpay_on = rzp_available()
-    paypal_on = paypal_available()
+
+    def _avail(gid: str, real_on: bool) -> bool:
+        cfg = gw_cfg.get(gid, {"enabled": True, "mock": True})
+        if not cfg.get("enabled", True):
+            return False
+        return bool(real_on or cfg.get("mock", True))
+
+    stripe_real = bool(os.environ.get("STRIPE_API_KEY") or os.environ.get("STRIPE_SECRET_KEY"))
+    stripe_on = _avail("stripe", stripe_real)
+    razorpay_on = _avail("razorpay", rzp_available())
+    paypal_on = _avail("paypal", paypal_available())
     if country == "IN" and razorpay_on:
         recommended = "razorpay"
     elif stripe_on:
@@ -469,6 +597,44 @@ async def root():
     return {"app": "Ugh!PDF", "tools": len(TOOLS), "categories": len(CATEGORIES)}
 
 
+# ============ Maintenance kill-switch middleware ============
+async def _is_admin_request(request: Request) -> bool:
+    auth = request.headers.get("authorization") or ""
+    if not auth.startswith("Bearer "):
+        return False
+    try:
+        payload = jwt.decode(auth.split(" ", 1)[1], JWT_SECRET, algorithms=[JWT_ALG])
+        uid = payload["sub"]
+    except Exception:
+        return False
+    u = await db.users.find_one({"_id": uid})
+    return bool(u and u.get("is_admin"))
+
+
+_MAINT_ALLOW_EXACT = {"/api", "/api/", "/api/config", "/api/auth/login", "/api/auth/me"}
+_MAINT_ALLOW_PREFIX = ("/api/admin",)
+
+
+@app.middleware("http")
+async def maintenance_gate(request: Request, call_next):
+    path = request.url.path
+    if request.method != "OPTIONS" and path.startswith("/api"):
+        try:
+            s = await get_settings()
+        except Exception:
+            s = {}
+        if s.get("maintenance_mode"):
+            allowed = path in _MAINT_ALLOW_EXACT or any(path.startswith(p) for p in _MAINT_ALLOW_PREFIX)
+            if not allowed and not await _is_admin_request(request):
+                from starlette.responses import JSONResponse
+                return JSONResponse(
+                    status_code=503,
+                    content={"detail": "Ugh!PDF is down for maintenance. Please check back soon.",
+                             "maintenance": True},
+                )
+    return await call_next(request)
+
+
 app.include_router(api)
 app.add_middleware(
     CORSMiddleware,
@@ -490,6 +656,33 @@ async def _init_indexes():
         log.info("user_jobs + rag_indexes TTL indexes ensured")
     except Exception as e:
         log.warning(f"index init warn: {e}")
+    # Ensure global settings doc exists
+    try:
+        await get_settings(force=True)
+        log.info("global settings ensured")
+    except Exception as e:
+        log.warning(f"settings init warn: {e}")
+    # Seed the super-admin (idempotent)
+    try:
+        if ADMIN_EMAIL and ADMIN_PASSWORD:
+            existing = await db.users.find_one({"email": ADMIN_EMAIL})
+            if not existing:
+                u = await _create_user(ADMIN_EMAIL, "Super Admin", _hash_pw(ADMIN_PASSWORD))
+                await db.users.update_one({"_id": u["_id"]}, {"$set": {"is_admin": True, "plan": "lifetime"}})
+                log.info(f"super-admin created: {ADMIN_EMAIL}")
+            else:
+                set_fields = {"is_admin": True}
+                if existing.get("plan") != "lifetime":
+                    set_fields["plan"] = "lifetime"
+                # keep admin password in sync with env
+                if not existing.get("password_hash") or not _verify_pw(ADMIN_PASSWORD, existing["password_hash"]):
+                    set_fields["password_hash"] = _hash_pw(ADMIN_PASSWORD)
+                await db.users.update_one({"_id": existing["_id"]}, {"$set": set_fields})
+                log.info(f"super-admin ensured: {ADMIN_EMAIL}")
+        else:
+            log.warning("ADMIN_EMAIL/ADMIN_PASSWORD not set — no super-admin seeded")
+    except Exception as e:
+        log.warning(f"admin seed warn: {e}")
     # Warm embedder
     try:
         import asyncio, rag as _rag
