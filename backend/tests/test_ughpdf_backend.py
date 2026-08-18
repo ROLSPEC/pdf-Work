@@ -426,7 +426,7 @@ def test_billing_checkout_real_stripe():
     r2 = requests.post(
         f"{API}/billing/checkout",
         headers={"Authorization": f"Bearer {tok}"},
-        json={"origin_url": "https://pdf-52-tools.preview.emergentagent.com"},
+        json={"origin_url": "https://repo-reader-59.preview.emergentagent.com"},
         timeout=30,
     )
     assert r2.status_code == 200, r2.text
